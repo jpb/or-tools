@@ -203,9 +203,6 @@ std::function<void(Model*)> Cumulative(
       if (parameters.exploit_all_precedences()) {
         model->GetOrCreate<PrecedenceRelations>()->ComputeFullPrecedences(
             index_to_end_vars, &full_precedences);
-      } else {
-        model->GetOrCreate<PrecedencesPropagator>()->ComputePartialPrecedences(
-            index_to_end_vars, &full_precedences);
       }
       for (const FullIntegerPrecedence& data : full_precedences) {
         const int size = data.indices.size();
@@ -251,6 +248,22 @@ std::function<void(Model*)> Cumulative(
     // It increases the minimum of the capacity variable.
     if (parameters.use_overload_checker_in_cumulative()) {
       AddCumulativeOverloadChecker(capacity, helper, demands_helper, model);
+    }
+    if (parameters.use_conservative_scale_overload_checker()) {
+      // Since we use the potential DFF conflict on demands to apply the
+      // heuristic, only do so if any demand is greater than 1.
+      bool any_demand_greater_than_one = false;
+      for (int i = 0; i < vars.size(); ++i) {
+        const IntegerValue demand_min = integer_trail->LowerBound(demands[i]);
+        if (demand_min > 1) {
+          any_demand_greater_than_one = true;
+          break;
+        }
+      }
+      if (any_demand_greater_than_one) {
+        AddCumulativeOverloadCheckerDff(capacity, helper, demands_helper,
+                                        model);
+      }
     }
 
     // Propagator responsible for applying the Timetable Edge finding filtering

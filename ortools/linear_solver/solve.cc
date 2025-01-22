@@ -51,13 +51,16 @@
 
 #include <cstdio>
 #include <iostream>
+#include <optional>
 #include <string>
 #include <utility>
 
+#include "absl/flags/declare.h"
 #include "absl/flags/flag.h"
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
 #include "absl/strings/match.h"
+#include "absl/strings/str_cat.h"
 #include "absl/strings/str_format.h"
 #include "absl/time/time.h"
 #include "ortools/base/file.h"
@@ -67,6 +70,7 @@
 #include "ortools/base/options.h"
 #include "ortools/linear_solver/linear_solver.h"
 #include "ortools/linear_solver/linear_solver.pb.h"
+#include "ortools/linear_solver/model_exporter.h"
 #include "ortools/lp_data/lp_parser.h"
 #include "ortools/lp_data/mps_reader.h"
 #include "ortools/lp_data/sol_reader.h"
@@ -78,9 +82,11 @@
 ABSL_FLAG(std::string, input, "", "REQUIRED: Input file name.");
 ABSL_FLAG(std::string, sol_hint, "",
           "Input file name with solution in .sol format.");
-ABSL_FLAG(std::string, solver, "glop",
+ABSL_FLAG(std::optional<std::string>, solver, std::nullopt,
           "The solver to use: bop, cbc, clp, glop, glpk_lp, glpk_mip, "
-          "gurobi_lp, gurobi_mip, pdlp, scip, knapsack, sat.");
+          "gurobi_lp, gurobi_mip, pdlp, scip, knapsack, sat. If unspecified "
+          "either use MPModelRequest.solver_type if the --input is an "
+          "MPModelRequest and the field is set or use glop.");
 ABSL_FLAG(int, num_threads, 1,
           "Number of threads to use by the underlying solver.");
 ABSL_FLAG(std::string, params_file, "",
@@ -111,6 +117,8 @@ ABSL_FLAG(std::string, dump_response, "",
           "If non-empty, dumps MPSolutionResponse there.");
 ABSL_FLAG(std::string, sol_file, "",
           "If non-empty, output the best solution in Miplib .sol format.");
+ABSL_FLAG(std::string, dump_mps, "",
+          "If non-empty, dumps the model in mps format there.");
 
 ABSL_DECLARE_FLAG(bool, verify_solution);  // Defined in ./linear_solver.cc
 ABSL_DECLARE_FLAG(bool,
@@ -263,9 +271,15 @@ void Run() {
   QCHECK_GE(absl::GetFlag(FLAGS_time_limit), absl::ZeroDuration())
       << "--time_limit must be given a positive duration";
 
-  MPSolver::OptimizationProblemType type;
-  CHECK(MPSolver::ParseSolverType(absl::GetFlag(FLAGS_solver), &type))
-      << "Unsupported --solver: " << absl::GetFlag(FLAGS_solver);
+  // Parses --solver if set.
+  std::optional<MPSolver::OptimizationProblemType> type;
+  if (const std::optional<std::string> type_flag = absl::GetFlag(FLAGS_solver);
+      type_flag.has_value()) {
+    MPSolver::OptimizationProblemType decoded_type;
+    QCHECK(MPSolver::ParseSolverType(type_flag.value(), &decoded_type))
+        << "Unsupported --solver: " << type_flag.value();
+    type = decoded_type;
+  }
 
   MPModelRequest request_proto = ReadMipModel(absl::GetFlag(FLAGS_input));
 
@@ -273,7 +287,7 @@ void Run() {
     const auto read_sol =
         ParseSolFile(absl::GetFlag(FLAGS_sol_hint), request_proto.model());
     CHECK_OK(read_sol.status());
-    const MPSolutionResponse sol = read_sol.value();
+    const MPSolutionResponse& sol = read_sol.value();
     if (request_proto.model().has_solution_hint()) {
       LOG(WARNING) << "Overwriting solution hint found in the request with "
                    << "solution from " << absl::GetFlag(FLAGS_sol_hint);
@@ -301,8 +315,16 @@ void Run() {
                << absl::GetFlag(FLAGS_dump_format);
   }
 
+  if (!absl::GetFlag(FLAGS_dump_mps).empty()) {
+    CHECK_OK(WriteModelToMpsFile(absl::GetFlag(FLAGS_dump_mps),
+                                 request_proto.model()));
+  }
+
   // Set or override request proto options from the command line flags.
-  request_proto.set_solver_type(static_cast<MPModelRequest::SolverType>(type));
+  if (type.has_value() || !request_proto.has_solver_type()) {
+    request_proto.set_solver_type(static_cast<MPModelRequest::SolverType>(
+        type.value_or(MPSolver::GLOP_LINEAR_PROGRAMMING)));
+  }
   if (absl::GetFlag(FLAGS_time_limit) != absl::InfiniteDuration()) {
     LOG(INFO) << "Setting a time limit of " << absl::GetFlag(FLAGS_time_limit);
     request_proto.set_solver_time_limit_seconds(

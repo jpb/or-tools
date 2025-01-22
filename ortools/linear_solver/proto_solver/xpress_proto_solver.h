@@ -14,14 +14,13 @@
 #ifndef OR_TOOLS_LINEAR_SOLVER_PROTO_SOLVER_XPRESS_PROTO_SOLVER_H_
 #define OR_TOOLS_LINEAR_SOLVER_PROTO_SOLVER_XPRESS_PROTO_SOLVER_H_
 
-#include <string>
-
 #include "ortools/linear_solver/linear_solver.pb.h"
+#include "ortools/util/lazy_mutable_copy.h"
 
 namespace operations_research {
 
 // Solves the input request.
-MPSolutionResponse XPressSolveProto(const MPModelRequest& request);
+MPSolutionResponse XPressSolveProto(LazyMutableCopy<MPModelRequest> request);
 
 }  // namespace operations_research
 

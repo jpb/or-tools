@@ -29,7 +29,7 @@
 %unignore operations_research::CppFlags::log_prefix;
 %unignore operations_research::CppFlags::cp_model_dump_prefix;
 %unignore operations_research::CppFlags::cp_model_dump_models;
-%unignore operations_research::CppFlags::cp_model_dump_lns;
+%unignore operations_research::CppFlags::cp_model_dump_submodels;
 %unignore operations_research::CppFlags::cp_model_dump_response;
 
 // Expose the static methods of the bridge class.
@@ -37,7 +37,7 @@
 %rename (initLogging) operations_research::CppBridge::InitLogging;
 %rename (shutdownLogging) operations_research::CppBridge::ShutdownLogging;
 %rename (setFlags) operations_research::CppBridge::SetFlags;
-%rename (logGurobiSharedLibrary) operations_research::CppBridge::LoadGurobiSharedLibrary;
+%rename (loadGurobiSharedLibrary) operations_research::CppBridge::LoadGurobiSharedLibrary;
 
 %unignore operations_research::OrToolsVersion;
 %rename (getMajorNumber) operations_research::OrToolsVersion::MajorNumber;

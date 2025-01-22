@@ -11,6 +11,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+// IWYU pragma: private, include "ortools/math_opt/cpp/math_opt.h"
+// IWYU pragma: friend "ortools/math_opt/cpp/.*"
+
 #ifndef OR_TOOLS_MATH_OPT_CPP_SOLVER_RESOURCES_H_
 #define OR_TOOLS_MATH_OPT_CPP_SOLVER_RESOURCES_H_
 
@@ -57,6 +60,10 @@ struct SolverResources {
   // Note that if the SolveParameters.threads is not set then this parameter
   // should also be left unset.
   std::optional<double> cpu;
+
+  // The limit of RAM for the solve in bytes. Must be finite and >=1.0 (even
+  // though it should in practice be much larger).
+  std::optional<double> ram;
 
   SolverResourcesProto Proto() const;
   static absl::StatusOr<SolverResources> FromProto(

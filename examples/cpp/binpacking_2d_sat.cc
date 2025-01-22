@@ -18,14 +18,18 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <cstdlib>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
+#include "absl/container/btree_map.h"
 #include "absl/container/btree_set.h"
 #include "absl/flags/flag.h"
 #include "absl/log/check.h"
 #include "absl/strings/str_cat.h"
+#include "absl/types/span.h"
 #include "google/protobuf/text_format.h"
 #include "ortools/base/init_google.h"
 #include "ortools/base/logging.h"
@@ -44,7 +48,7 @@ ABSL_FLAG(std::string, params, "", "Sat parameters in text proto format.");
 ABSL_FLAG(int, max_bins, 0,
           "Maximum number of bins. The 0 default value implies the code will "
           "use some heuristics to compute this number.");
-ABSL_FLAG(bool, symmetry_breaking, true, "Use symmetry breaking constraints");
+ABSL_FLAG(int, symmetry_breaking_level, 2, "Use symmetry breaking constraints");
 ABSL_FLAG(bool, use_global_cumulative, true,
           "Use a global cumulative relaxation");
 
@@ -171,7 +175,7 @@ absl::btree_set<int> FindFixedItems(
 }
 
 // Solves a subset sum problem to find the maximum reachable max size.
-int64_t MaxSubsetSumSize(const std::vector<int64_t>& sizes, int64_t max_size) {
+int64_t MaxSubsetSumSize(absl::Span<const int64_t> sizes, int64_t max_size) {
   CpModelBuilder builder;
   LinearExpr weighed_sum;
   for (const int size : sizes) {
@@ -280,7 +284,7 @@ void LoadAndSolve(const std::string& file_name, int instance) {
   const absl::btree_set<int> fixed_items = FindFixedItems(problem);
 
   // Fix the fixed_items to the first fixed_items.size() bins.
-  CHECK_LT(fixed_items.size(), max_bins)
+  CHECK_LE(fixed_items.size(), max_bins)
       << "Infeasible problem, increase max_bins";
   int count = 0;
   for (const int item : fixed_items) {
@@ -392,6 +396,36 @@ void LoadAndSolve(const std::string& file_name, int instance) {
     LOG(INFO) << num_items_fixed_on_one_border << " items fixed on one border";
   }
 
+  if (absl::GetFlag(FLAGS_symmetry_breaking_level) >= 2) {
+    // Break symmetry of a permutation of identical items
+    absl::btree_map<std::pair<int64_t, int64_t>, std::vector<int>>
+        item_indexes_for_dimensions;
+    for (int item = 0; item < num_items; ++item) {
+      item_indexes_for_dimensions[{problem.items(item).shapes(0).dimensions(0),
+                                   problem.items(item).shapes(0).dimensions(1)}]
+          .push_back(item);
+    }
+    int num_identical_items = 0;
+    for (const auto& [dim, item_indexes] : item_indexes_for_dimensions) {
+      if (item_indexes.size() == 1) {
+        continue;
+      }
+      ++num_identical_items;
+      for (int i = 1; i < item_indexes.size(); ++i) {
+        const IntVar prev_start_x = starts_by_dimension[item_indexes[i - 1]][0];
+        const IntVar curr_start_x = starts_by_dimension[item_indexes[i]][0];
+
+        const IntVar prev_start_y = starts_by_dimension[item_indexes[i - 1]][1];
+        const IntVar curr_start_y = starts_by_dimension[item_indexes[i]][1];
+        cp_model.AddLessOrEqual(prev_start_x * bin_sizes[1] + prev_start_y,
+                                curr_start_x * bin_sizes[1] + curr_start_y);
+      }
+    }
+    if (num_identical_items > 0) {
+      LOG(INFO) << num_identical_items << " identical items";
+    }
+  }
+
   // Add non overlapping constraint.
   for (int b = 0; b < max_bins; ++b) {
     NoOverlap2DConstraint no_overlap_2d = cp_model.AddNoOverlap2D();
@@ -437,12 +471,13 @@ void LoadAndSolve(const std::string& file_name, int instance) {
 
   // Objective definition.
   cp_model.Minimize(obj);
-  for (int b = trivial_lb; b + 1 < max_bins; ++b) {
+  CHECK_GT(trivial_lb, 0);
+  for (int b = trivial_lb; b < max_bins; ++b) {
     cp_model.AddGreaterOrEqual(obj, b + 1).OnlyEnforceIf(bin_is_used[b]);
-    cp_model.AddImplication(bin_is_used[b + 1], bin_is_used[b]);
+    cp_model.AddImplication(bin_is_used[b], bin_is_used[b - 1]);
   }
 
-  if (absl::GetFlag(FLAGS_symmetry_breaking)) {
+  if (absl::GetFlag(FLAGS_symmetry_breaking_level) >= 1) {
     // First sort the items not yet fixed by area.
     std::vector<int> not_placed_items;
     for (int item = 0; item < num_items; ++item) {

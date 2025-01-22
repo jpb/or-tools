@@ -121,8 +121,6 @@
 #ifndef OR_TOOLS_GRAPH_ONE_TREE_LOWER_BOUND_H_
 #define OR_TOOLS_GRAPH_ONE_TREE_LOWER_BOUND_H_
 
-#include <math.h>
-
 #include <cmath>
 #include <cstdint>
 #include <limits>
@@ -131,8 +129,9 @@
 #include <vector>
 
 #include "absl/types/span.h"
-#include "ortools/base/types.h"
+#include "ortools/base/logging.h"
 #include "ortools/graph/christofides.h"
+#include "ortools/graph/graph.h"
 #include "ortools/graph/minimum_spanning_tree.h"
 
 namespace operations_research {
@@ -335,10 +334,10 @@ int GetNodeMinimizingEdgeCostToSource(const GraphType& graph, int source,
 template <typename CostFunction, typename GraphType, typename CostType>
 std::vector<int> ComputeOneTree(const GraphType& graph,
                                 const CostFunction& cost,
-                                const std::vector<double>& weights,
-                                const std::vector<int>& sorted_arcs,
+                                absl::Span<const double> weights,
+                                absl::Span<const int> sorted_arcs,
                                 CostType* one_tree_cost) {
-  const auto weighed_cost = [&cost, &weights](int from, int to) {
+  const auto weighed_cost = [&cost, weights](int from, int to) {
     return cost(from, to) + weights[from] + weights[to];
   };
   // Compute MST on graph.

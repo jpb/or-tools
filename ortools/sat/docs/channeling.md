@@ -1,4 +1,4 @@
-[home](README.md) | [boolean logic](boolean_logic.md) | [integer arithmetic](integer_arithmetic.md) | [channeling constraints](channeling.md) | [scheduling](scheduling.md) | [Using the CP-SAT solver](solver.md) | [Model manipulation](model.md) | [Troubleshooting](troubleshooting.md) | [Python API](https://google.github.io/or-tools/python/ortools/sat/python/cp_model.html)
+[home](README.md) | [boolean logic](boolean_logic.md) | [integer arithmetic](integer_arithmetic.md) | [channeling constraints](channeling.md) | [scheduling](scheduling.md) | [Using the CP-SAT solver](solver.md) | [Model manipulation](model.md) | [Troubleshooting](troubleshooting.md) | [Python API](https://or-tools.github.io/docs/pdoc/ortools/sat/python/cp_model.html)
 ----------------- | --------------------------------- | ------------------------------------------- | --------------------------------------- | --------------------------- | ------------------------------------ | ------------------------------ | ------------------------------------- | ---------------------------------------------------------------------------------------
 # Channeling constraints
 
@@ -165,13 +165,14 @@ import com.google.ortools.sat.BoolVar;
 import com.google.ortools.sat.CpModel;
 import com.google.ortools.sat.CpSolver;
 import com.google.ortools.sat.CpSolverSolutionCallback;
+import com.google.ortools.sat.CpSolverStatus;
 import com.google.ortools.sat.DecisionStrategyProto;
 import com.google.ortools.sat.IntVar;
 import com.google.ortools.sat.LinearExpr;
 import com.google.ortools.sat.SatParameters;
 
 /** Link integer constraints together. */
-public class ChannelingSampleSat {
+public final class ChannelingSampleSat {
   public static void main(String[] args) throws Exception {
     Loader.loadNativeLibraries();
     // Create the CP-SAT model.
@@ -207,7 +208,7 @@ public class ChannelingSampleSat {
     solver.getParameters().setEnumerateAllSolutions(true);
 
     // Solve the problem with the printer callback.
-    solver.solve(model, new CpSolverSolutionCallback() {
+    CpSolverStatus unusedStatus = solver.solve(model, new CpSolverSolutionCallback() {
       public CpSolverSolutionCallback init(IntVar[] variables) {
         variableArray = variables;
         return this;
@@ -224,6 +225,8 @@ public class ChannelingSampleSat {
       private IntVar[] variableArray;
     }.init(new IntVar[] {vars[0], vars[1], b}));
   }
+
+  private ChannelingSampleSat() {}
 }
 ```
 
@@ -385,6 +388,113 @@ x=9 y=1 b=1
 x=10 y=0 b=1
 ```
 
+## Computing the index of the first Boolean variable set to true
+
+A common request is to compute the index of the first Boolean variable set to
+true. It can be encoded using a min_equality constraint. The index will be set
+to the number of Boolean variables if they are all false.
+
+### Python code
+
+```python
+#!/usr/bin/env python3
+"""Compute the index of the first Boolean variable set to true."""
+
+from ortools.sat.python import cp_model
+
+
+class VarArraySolutionPrinter(cp_model.CpSolverSolutionCallback):
+    """Print intermediate solutions."""
+
+    def __init__(self, index: cp_model.IntVar, boolvars: list[cp_model.IntVar]):
+        cp_model.CpSolverSolutionCallback.__init__(self)
+        self.__index = index
+        self.__boolvars = boolvars
+
+    def on_solution_callback(self) -> None:
+        line = ""
+        for v in self.__boolvars:
+            line += f"{self.value(v)}"
+        line += f" -> {self.value(self.__index)}"
+        print(line)
+
+
+def index_of_first_bool_at_true_sample_sat():
+    """Compute the index of the first Boolean variable set to true."""
+
+    # Model.
+    model = cp_model.CpModel()
+
+    # Variables
+    num_bool_vars = 5
+    bool_vars = [model.new_bool_var(f"{i}") for i in range(num_bool_vars)]
+    index = model.new_int_var(0, num_bool_vars, "index")
+
+    # Channeling between the index and the Boolean variables.
+    model.add_min_equality(
+        index,
+        [
+            num_bool_vars - bool_vars[i] * (num_bool_vars - i)
+            for i in range(num_bool_vars)
+        ],
+    )
+
+    # Flip bool_vars in increasing order.
+    model.add_decision_strategy(
+        bool_vars, cp_model.CHOOSE_FIRST, cp_model.SELECT_MIN_VALUE
+    )
+
+    # Create a solver and solve with a fixed search.
+    solver = cp_model.CpSolver()
+
+    # Force the solver to follow the decision strategy exactly.
+    solver.parameters.search_branching = cp_model.FIXED_SEARCH
+
+    # Search and print out all solutions.
+    solver.parameters.enumerate_all_solutions = True
+    solution_printer = VarArraySolutionPrinter(index, bool_vars)
+    solver.solve(model, solution_printer)
+
+
+index_of_first_bool_at_true_sample_sat()
+```
+
+This displays the following:
+
+```
+00000 -> 5
+00001 -> 4
+00010 -> 3
+00011 -> 3
+00100 -> 2
+00101 -> 2
+00110 -> 2
+00111 -> 2
+01000 -> 1
+01001 -> 1
+01010 -> 1
+01011 -> 1
+01100 -> 1
+01101 -> 1
+01110 -> 1
+01111 -> 1
+10000 -> 0
+10001 -> 0
+10010 -> 0
+10011 -> 0
+10100 -> 0
+10101 -> 0
+10110 -> 0
+10111 -> 0
+11000 -> 0
+11001 -> 0
+11010 -> 0
+11011 -> 0
+11100 -> 0
+11101 -> 0
+11110 -> 0
+11111 -> 0
+```
 
 ## A bin-packing problem
 

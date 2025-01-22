@@ -20,15 +20,15 @@
 #include <utility>
 #include <vector>
 
+#include "absl/base/log_severity.h"
 #include "absl/container/flat_hash_map.h"
 #include "absl/random/distributions.h"
 #include "absl/strings/str_cat.h"
+#include "absl/types/span.h"
 #include "gtest/gtest.h"
 #include "ortools/base/gmock.h"
-#include "ortools/base/map_util.h"
 #include "ortools/graph/bounded_dijkstra.h"
 #include "ortools/graph/graph.h"
-#include "util/tuple/dump_vars.h"
 
 namespace operations_research {
 namespace {
@@ -100,9 +100,6 @@ TEST(BidirectionalDijkstraTest, SmallTest) {
 
 TEST(BidirectionalDijkstraTest, RandomizedCorrectnessTest) {
   std::mt19937 random(12345);
-  // Performance on forge as of 2016-10-05 with these numbers, over 1000 runs:
-  // - fastbuild: max = 21.9s, avg = 10.7s.
-  // - opt: max = 23.2s, avg = 10.4s.
   const int kNumGraphs = DEBUG_MODE ? 100 : 300;
   const int kNumQueriesPerGraph = DEBUG_MODE ? 10 : 30;
   const int kNumNodes = 1000;
@@ -145,7 +142,7 @@ TEST(BidirectionalDijkstraTest, RandomizedCorrectnessTest) {
         &forward_graph, &forward_lengths);
 
     // To print some debugging info in case the test fails.
-    auto print_arc_path = [&](const std::vector<int>& arc_path) -> std::string {
+    auto print_arc_path = [&](absl::Span<const int> arc_path) -> std::string {
       if (arc_path.empty()) return "<EMPTY>";
       std::string out = absl::StrCat(forward_graph.Tail(arc_path[0]));
       double total_length = 0.0;
@@ -158,7 +155,7 @@ TEST(BidirectionalDijkstraTest, RandomizedCorrectnessTest) {
       return out;
     };
     auto print_node_distances =
-        [&](const std::vector<Dijkstra::NodeDistance>& nds) -> std::string {
+        [&](absl::Span<const Dijkstra::NodeDistance> nds) -> std::string {
       std::string out = "{";
       for (const Dijkstra::NodeDistance& nd : nds) {
         absl::StrAppend(&out, " #", nd.node, " dist=", (nd.distance), ",");

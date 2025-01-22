@@ -28,7 +28,6 @@
 #include "absl/log/check.h"
 #include "absl/meta/type_traits.h"
 #include "absl/strings/str_cat.h"
-#include "absl/strings/string_view.h"
 #include "absl/types/span.h"
 #include "ortools/base/logging.h"
 #include "ortools/port/proto_utils.h"
@@ -268,9 +267,9 @@ std::string ValidateLinearExpression(const CpModelProto& model,
     return absl::StrCat("Possible overflow in linear expression: ",
                         ProtobufShortDebugString(expr));
   }
-  for (const int ref : expr.vars()) {
-    if (!RefIsPositive(ref)) {
-      return absl::StrCat("Invalid negated reference in linear expression: ",
+  for (const int var : expr.vars()) {
+    if (!RefIsPositive(var)) {
+      return absl::StrCat("Invalid negated variable in linear expression: ",
                           ProtobufShortDebugString(expr));
     }
   }
@@ -304,6 +303,12 @@ std::string ValidateLinearConstraint(const CpModelProto& model,
   if (ct.linear().coeffs_size() != ct.linear().vars_size()) {
     return absl::StrCat("coeffs_size() != vars_size() in constraint: ",
                         ProtobufShortDebugString(ct));
+  }
+  for (const int var : ct.linear().vars()) {
+    if (!RefIsPositive(var)) {
+      return absl::StrCat("Invalid negated variable in linear constraint: ",
+                          ProtobufShortDebugString(ct));
+    }
   }
   const LinearConstraintProto& arg = ct.linear();
   if (PossibleIntegerOverflow(model, arg.vars(), arg.coeffs())) {
@@ -1204,8 +1209,12 @@ class ConstraintChecker {
   bool LinearConstraintIsFeasible(const ConstraintProto& ct) {
     int64_t sum = 0;
     const int num_variables = ct.linear().coeffs_size();
+    const int* const vars = ct.linear().vars().data();
+    const int64_t* const coeffs = ct.linear().coeffs().data();
     for (int i = 0; i < num_variables; ++i) {
-      sum += Value(ct.linear().vars(i)) * ct.linear().coeffs(i);
+      // We know we only have positive reference now.
+      DCHECK(RefIsPositive(vars[i]));
+      sum += variable_values_[vars[i]] * coeffs[i];
     }
     const bool result = DomainInProtoContains(ct.linear(), sum);
     if (!result) {

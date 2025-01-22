@@ -14,6 +14,7 @@
 #include "ortools/util/file_util.h"
 
 #include <string>
+#include <utility>
 
 #include "absl/log/check.h"
 #include "absl/status/status.h"
@@ -26,6 +27,7 @@
 #include "google/protobuf/message.h"
 #include "google/protobuf/text_format.h"
 #include "google/protobuf/util/json_util.h"
+#include "ortools/base/file.h"
 #include "ortools/base/gzipstring.h"
 #include "ortools/base/helpers.h"
 #include "ortools/base/logging.h"
@@ -163,7 +165,7 @@ absl::Status WriteProtoToFile(absl::string_view filename,
     case ProtoWriteFormat::kJson: {
       google::protobuf::util::JsonPrintOptions options;
       options.add_whitespace = true;
-      options.always_print_primitive_fields = true;
+      options.always_print_fields_with_no_presence = true;
       options.preserve_proto_field_names = true;
       if (!google::protobuf::util::MessageToJsonString(proto, &output_string,
                                                        options)

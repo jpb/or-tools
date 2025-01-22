@@ -31,7 +31,7 @@ if(${SWIG_VERSION} VERSION_GREATER_EQUAL 4)
   list(APPEND CMAKE_SWIG_FLAGS "-doxygen")
 endif()
 
-if(UNIX AND NOT APPLE)
+if(UNIX AND NOT APPLE AND NOT (CMAKE_SYSTEM_NAME STREQUAL "OpenBSD"))
   if (CMAKE_SIZEOF_VOID_P EQUAL 8)
     list(APPEND CMAKE_SWIG_FLAGS "-DSWIGWORDSIZE64")
   else()
@@ -282,9 +282,9 @@ foreach(SUBPROJECT IN ITEMS
  init
  algorithms
  graph
- constraint_solver
  linear_solver
  ${PDLP_DIR}
+ constraint_solver
  sat
  scheduling
  util)
@@ -358,12 +358,13 @@ if(BUILD_MATH_OPT)
   file(COPY
     ortools/math_opt/python/callback.py
     ortools/math_opt/python/compute_infeasible_subsystem_result.py
+    ortools/math_opt/python/errors.py
     ortools/math_opt/python/expressions.py
     ortools/math_opt/python/hash_model_storage.py
     ortools/math_opt/python/mathopt.py
     ortools/math_opt/python/message_callback.py
-    ortools/math_opt/python/model_parameters.py
     ortools/math_opt/python/model.py
+    ortools/math_opt/python/model_parameters.py
     ortools/math_opt/python/model_storage.py
     ortools/math_opt/python/normalize.py
     ortools/math_opt/python/parameters.py
@@ -449,6 +450,8 @@ add_custom_command(
   COMMAND ${CMAKE_COMMAND} -E copy
    $<TARGET_FILE:knapsack_solver_pybind11> ${PYTHON_PROJECT}/algorithms/python
   COMMAND ${CMAKE_COMMAND} -E copy
+   $<TARGET_FILE:set_cover_pybind11> ${PYTHON_PROJECT}/algorithms/python
+  COMMAND ${CMAKE_COMMAND} -E copy
    $<TARGET_FILE:linear_sum_assignment_pybind11> ${PYTHON_PROJECT}/graph/python
   COMMAND ${CMAKE_COMMAND} -E copy
    $<TARGET_FILE:max_flow_pybind11> ${PYTHON_PROJECT}/graph/python
@@ -479,6 +482,7 @@ add_custom_command(
   DEPENDS
     init_pybind11
     knapsack_solver_pybind11
+    set_cover_pybind11
     linear_sum_assignment_pybind11
     max_flow_pybind11
     min_cost_flow_pybind11
@@ -514,6 +518,7 @@ add_custom_command(
   COMMAND ${CMAKE_COMMAND} -E remove -f stub_timestamp
   COMMAND ${stubgen_EXECUTABLE} -p ortools.init.python.init --output .
   COMMAND ${stubgen_EXECUTABLE} -p ortools.algorithms.python.knapsack_solver --output .
+  COMMAND ${stubgen_EXECUTABLE} -p ortools.algorithms.python.set_cover --output .
   COMMAND ${stubgen_EXECUTABLE} -p ortools.graph.python.linear_sum_assignment --output .
   COMMAND ${stubgen_EXECUTABLE} -p ortools.graph.python.max_flow --output .
   COMMAND ${stubgen_EXECUTABLE} -p ortools.graph.python.min_cost_flow --output .

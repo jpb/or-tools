@@ -11,8 +11,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-%include "stdint.i"
-
 %include "ortools/base/base.i"
 %include "enums.swg"
 %import "ortools/util/csharp/vector.i"
@@ -21,13 +19,13 @@
 #include "ortools/linear_solver/wrappers/model_builder_helper.h"
 %}
 
-%module(directors="1") operations_research_model_builder
-
 %template(IntVector) std::vector<int>;
 VECTOR_AS_CSHARP_ARRAY(int, int, int, IntVector);
 
 %template(DoubleVector) std::vector<double>;
 VECTOR_AS_CSHARP_ARRAY(double, double, double, DoubleVector);
+
+%module(directors="1") operations_research_model_builder
 
 %extend operations_research::ModelBuilderHelper {
   std::string ExportToMpsString(bool obfuscate) {
@@ -40,6 +38,12 @@ VECTOR_AS_CSHARP_ARRAY(double, double, double, DoubleVector);
     operations_research::MPModelExportOptions options;
     options.obfuscate = obfuscate;
     return $self->ExportToLpString(options);
+  }
+
+  bool WriteToMpsFile(const std::string& filename, bool obfuscate) {
+    operations_research::MPModelExportOptions options;
+    options.obfuscate = obfuscate;
+    return $self->WriteToMpsFile(filename, options);
   }
 }  // Extend operations_research::ModelBuilderHelper
 
@@ -122,6 +126,7 @@ VECTOR_AS_CSHARP_ARRAY(double, double, double, DoubleVector);
 %unignore operations_research::ModelBuilderHelper::ImportFromMpsFile;
 %unignore operations_research::ModelBuilderHelper::ImportFromLpString;
 %unignore operations_research::ModelBuilderHelper::ImportFromLpFile;
+%unignore operations_research::ModelBuilderHelper::WriteToMpsFile(std::string, bool);
 %unignore operations_research::ModelBuilderHelper::ExportToMpsString(bool);
 %unignore operations_research::ModelBuilderHelper::ExportToLpString(bool);
 %unignore operations_research::ModelBuilderHelper::OverwriteModel;

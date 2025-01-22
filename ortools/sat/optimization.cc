@@ -439,6 +439,7 @@ CoreBasedOptimizer::CoreBasedOptimizer(
     std::function<void()> feasible_solution_observer, Model* model)
     : parameters_(model->GetOrCreate<SatParameters>()),
       sat_solver_(model->GetOrCreate<SatSolver>()),
+      clauses_(model->GetOrCreate<ClauseManager>()),
       time_limit_(model->GetOrCreate<TimeLimit>()),
       implications_(model->GetOrCreate<BinaryImplicationGraph>()),
       integer_trail_(model->GetOrCreate<IntegerTrail>()),
@@ -666,9 +667,8 @@ bool CoreBasedOptimizer::CoverOptimization() {
 }
 
 SatSolver::Status CoreBasedOptimizer::OptimizeWithSatEncoding(
-    const std::vector<Literal>& literals,
-    const std::vector<IntegerVariable>& vars,
-    const std::vector<Coefficient>& coefficients, Coefficient offset) {
+    absl::Span<const Literal> literals, absl::Span<const IntegerVariable> vars,
+    absl::Span<const Coefficient> coefficients, Coefficient offset) {
   // Create one initial nodes per variables with cost.
   // TODO(user): We could create EncodingNode out of IntegerVariable.
   //
@@ -758,9 +758,10 @@ SatSolver::Status CoreBasedOptimizer::OptimizeWithSatEncoding(
       const int num_bools = sat_solver_->NumVariables();
       const int num_fixed = sat_solver_->NumFixedVariables();
       model_->GetOrCreate<SharedResponseManager>()->UpdateInnerObjectiveBounds(
-          absl::StrFormat("bool_core (num_cores=%d [%s] a=%u d=%d fixed=%d/%d)",
-                          iter, previous_core_info, encoder.nodes().size(),
-                          max_depth, num_fixed, num_bools),
+          absl::StrFormat(
+              "bool_core (num_cores=%d [%s] a=%u d=%d fixed=%d/%d clauses=%s)",
+              iter, previous_core_info, encoder.nodes().size(), max_depth,
+              num_fixed, num_bools, FormatCounter(clauses_->num_clauses())),
           new_obj_lb, integer_trail_->LevelZeroUpperBound(objective_var_));
     }
 
@@ -902,8 +903,8 @@ void CoreBasedOptimizer::PresolveObjectiveWithAtMostOne(
   // This contains non-negative value. If a literal has negative weight, then
   // we just put a positive weight on its negation and update the offset.
   const int num_literals = implications_->literal_size();
-  absl::StrongVector<LiteralIndex, Coefficient> weights(num_literals);
-  absl::StrongVector<LiteralIndex, bool> is_candidate(num_literals);
+  util_intops::StrongVector<LiteralIndex, Coefficient> weights(num_literals);
+  util_intops::StrongVector<LiteralIndex, bool> is_candidate(num_literals);
 
   // For now, we do not use weight. Note that finding the at most on in the
   // creation order of the variable make a HUGE difference on the max-sat frb
@@ -912,7 +913,7 @@ void CoreBasedOptimizer::PresolveObjectiveWithAtMostOne(
   // TODO(user): We can assign preferences to literals to favor certain at most
   // one instead of other. For now we don't, so ExpandAtMostOneWithWeight() will
   // kind of randomize the expansion amongst possible choices.
-  absl::StrongVector<LiteralIndex, double> preferences;
+  util_intops::StrongVector<LiteralIndex, double> preferences;
 
   // Collect all literals with "negative weights", we will try to find at most
   // one between them.

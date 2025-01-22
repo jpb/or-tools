@@ -15,18 +15,29 @@
 
 #include <atomic>
 #include <string>
+#include <utility>
 
 #include "ortools/linear_solver/linear_solver.h"
 #include "ortools/linear_solver/linear_solver.pb.h"
+#include "ortools/util/lazy_mutable_copy.h"
+#include "ortools/util/solve_interrupter.h"
 
 namespace operations_research {
 
-MPSolutionResponse SolveMPModel(const MPModelRequest& model_request,
-                                std::atomic<bool>* interrupt) {
-  // TODO(b/311704821): this function should not delegate to MPSolver, also true
-  // for the functions below.
+// TODO(b/311704821): this function should not delegate to MPSolver, also true
+// for the functions below.
+MPSolutionResponse SolveMPModel(LazyMutableCopy<MPModelRequest> request,
+                                const SolveInterrupter* interrupter) {
   MPSolutionResponse response;
-  MPSolver::SolveWithProto(model_request, &response, interrupt);
+  if (interrupter != nullptr) {
+    std::atomic<bool> atomic_bool = false;
+    ScopedSolveInterrupterCallback cleanup(
+        interrupter, [&atomic_bool] { atomic_bool.store(true); });
+    MPSolver::SolveLazyMutableRequest(std::move(request), &response,
+                                      &atomic_bool);
+  } else {
+    MPSolver::SolveLazyMutableRequest(std::move(request), &response);
+  }
   return response;
 }
 

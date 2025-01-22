@@ -107,7 +107,7 @@ public class CpModel
      */
     public ILiteral TrueLiteral()
     {
-        return true_literal_ ??= new BoolVar(model_, ConvertConstant(1));
+        return true_literal_ ??= new BoolVar(model_, ConvertConstantWithName(1, "true"));
     }
 
     /**
@@ -501,6 +501,11 @@ public class CpModel
         return ct;
     }
 
+    /**
+     * <summary>
+     * Adds <c>var == i + offset ⇔ bool_vars[i] == true for all i</c>.
+     * </summary>
+     */
     public void AddMapDomain(IntVar var, IEnumerable<IntVar> bool_vars, long offset = 0)
     {
         int i = 0;
@@ -523,11 +528,11 @@ public class CpModel
             model_.Constraints.Add(ct1);
 
             LinearConstraintProto lin2 = new LinearConstraintProto();
-            lin1.Vars.Capacity = 1;
+            lin2.Vars.Capacity = 1;
             lin2.Vars.Add(var_index);
-            lin1.Coeffs.Capacity = 1;
+            lin2.Coeffs.Capacity = 1;
             lin2.Coeffs.Add(1L);
-            lin1.Domain.Capacity = 4;
+            lin2.Domain.Capacity = 4;
             lin2.Domain.Add(Int64.MinValue);
             lin2.Domain.Add(offset + i - 1);
             lin2.Domain.Add(offset + i + 1);
@@ -817,7 +822,6 @@ public class CpModel
         LinearExpr startExpr = GetLinearExpr(start);
         LinearExpr sizeExpr = GetLinearExpr(size);
         LinearExpr endExpr = GetLinearExpr(end);
-        Add(startExpr + sizeExpr == endExpr);
 
         LinearExpressionProto startProto = GetLinearExpressionProto(startExpr);
         LinearExpressionProto sizeProto = GetLinearExpressionProto(sizeExpr);
@@ -875,7 +879,6 @@ public class CpModel
         LinearExpr startExpr = GetLinearExpr(start);
         LinearExpr sizeExpr = GetLinearExpr(size);
         LinearExpr endExpr = GetLinearExpr(end);
-        Add(startExpr + sizeExpr == endExpr).OnlyEnforceIf(is_present);
 
         LinearExpressionProto startProto = GetLinearExpressionProto(startExpr);
         LinearExpressionProto sizeProto = GetLinearExpressionProto(sizeExpr);
@@ -1044,6 +1047,23 @@ public class CpModel
         model_.SolutionHint.Values.Add(value);
     }
 
+    /** <summary>Adds variable hinting to the model.</summary>*/
+    public void AddHint(ILiteral lit, bool value)
+    {
+        model_.SolutionHint ??= new PartialVariableAssignment();
+        int index = lit.GetIndex();
+        if (index >= 0)
+        {
+            model_.SolutionHint.Vars.Add(index);
+            model_.SolutionHint.Values.Add(value ? 1 : 0);
+        }
+        else
+        {
+            model_.SolutionHint.Vars.Add(Negated(index));
+            model_.SolutionHint.Values.Add(value ? 0 : 1);
+        }
+    }
+
     /** <summary>Clears all hinting from the model.</summary>*/
     public void ClearHints()
     {
@@ -1170,6 +1190,24 @@ public class CpModel
         var.Domain.Capacity = 2;
         var.Domain.Add(value);
         var.Domain.Add(value);
+        constant_map_.Add(value, index);
+        model_.Variables.Add(var);
+        return index;
+    }
+
+    private int ConvertConstantWithName(long value, string name)
+    {
+        if (constant_map_.TryGetValue(value, out var index))
+        {
+            return index;
+        }
+
+        index = model_.Variables.Count;
+        IntegerVariableProto var = new IntegerVariableProto();
+        var.Domain.Capacity = 2;
+        var.Domain.Add(value);
+        var.Domain.Add(value);
+        var.Name = name;
         constant_map_.Add(value, index);
         model_.Variables.Add(var);
         return index;

@@ -27,6 +27,7 @@
 #include "absl/strings/str_cat.h"
 #include "absl/strings/string_view.h"
 #include "absl/types/span.h"
+#include "google/protobuf/descriptor.h"
 #include "google/protobuf/message.h"
 #include "google/protobuf/text_format.h"
 #include "ortools/base/stl_util.h"
@@ -932,6 +933,12 @@ bool ConvertCpModelProtoToCnf(const CpModelProto& cp_model, std::string* out) {
   }
 
   return true;
+}
+
+int CombineSeed(int base_seed, int64_t delta) {
+  CHECK_GE(delta, 0);
+  const uint64_t fp = FingerprintSingleField(delta, kDefaultFingerprintSeed);
+  return static_cast<int>(FingerprintSingleField(base_seed, fp) & (0x7FFFFFFF));
 }
 
 }  // namespace sat

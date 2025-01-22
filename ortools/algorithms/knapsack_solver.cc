@@ -19,6 +19,7 @@
 #include <memory>
 #include <queue>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "absl/log/check.h"
@@ -1282,7 +1283,7 @@ int64_t KnapsackMIPSolver::Solve(TimeLimit* /*time_limit*/,
 // ----- KnapsackCpSat -----
 class KnapsackCpSat : public BaseKnapsackSolver {
  public:
-  explicit KnapsackCpSat(const std::string& solver_name);
+  explicit KnapsackCpSat(absl::string_view solver_name);
 
   // Initializes the solver and enters the problem to be solved.
   void Init(const std::vector<int64_t>& profits,
@@ -1305,7 +1306,7 @@ class KnapsackCpSat : public BaseKnapsackSolver {
   std::vector<bool> best_solution_;
 };
 
-KnapsackCpSat::KnapsackCpSat(const std::string& solver_name)
+KnapsackCpSat::KnapsackCpSat(absl::string_view solver_name)
     : BaseKnapsackSolver(solver_name),
       profits_(),
       weights_(),
@@ -1623,7 +1624,7 @@ void KnapsackSolver::InitReducedProblem(
         one_dimension_reduced_weights.push_back(one_dimension_weights[item_id]);
       }
     }
-    reduced_weights.push_back(one_dimension_reduced_weights);
+    reduced_weights.push_back(std::move(one_dimension_reduced_weights));
   }
   solver_->Init(reduced_profits, reduced_weights, reduced_capacities);
 }

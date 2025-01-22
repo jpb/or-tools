@@ -72,9 +72,9 @@ void ComputeScalingErrors(absl::Span<const double> input,
 }
 
 template <bool use_bounds>
-void GetBestScalingOfDoublesToInt64(const std::vector<double>& input,
-                                    const std::vector<double>& lb,
-                                    const std::vector<double>& ub,
+void GetBestScalingOfDoublesToInt64(absl::Span<const double> input,
+                                    absl::Span<const double> lb,
+                                    absl::Span<const double> ub,
                                     int64_t max_absolute_sum,
                                     double* scaling_factor) {
   const double kInfinity = std::numeric_limits<double>::infinity();
@@ -174,18 +174,18 @@ void GetBestScalingOfDoublesToInt64(const std::vector<double>& input,
 
 }  // namespace
 
-void ComputeScalingErrors(const std::vector<double>& input,
-                          const std::vector<double>& lb,
-                          const std::vector<double>& ub, double scaling_factor,
+void ComputeScalingErrors(absl::Span<const double> input,
+                          absl::Span<const double> lb,
+                          absl::Span<const double> ub, double scaling_factor,
                           double* max_relative_coeff_error,
                           double* max_scaled_sum_error) {
   ComputeScalingErrors<true>(input, lb, ub, scaling_factor,
                              max_relative_coeff_error, max_scaled_sum_error);
 }
 
-double GetBestScalingOfDoublesToInt64(const std::vector<double>& input,
-                                      const std::vector<double>& lb,
-                                      const std::vector<double>& ub,
+double GetBestScalingOfDoublesToInt64(absl::Span<const double> input,
+                                      absl::Span<const double> lb,
+                                      absl::Span<const double> ub,
                                       int64_t max_absolute_sum) {
   double scaling_factor;
   GetBestScalingOfDoublesToInt64<true>(input, lb, ub, max_absolute_sum,
@@ -194,7 +194,7 @@ double GetBestScalingOfDoublesToInt64(const std::vector<double>& input,
   return scaling_factor;
 }
 
-void GetBestScalingOfDoublesToInt64(const std::vector<double>& input,
+void GetBestScalingOfDoublesToInt64(absl::Span<const double> input,
                                     int64_t max_absolute_sum,
                                     double* scaling_factor,
                                     double* max_relative_coeff_error) {

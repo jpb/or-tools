@@ -176,12 +176,29 @@ void LoadVariables(const CpModelProto& model_proto,
     // Compute the integer variable references used by the model.
     absl::flat_hash_set<int> used_variables;
 
+    const bool some_linerization =
+        m->GetOrCreate<SatParameters>()->linearization_level() > 0;
+
     IndexReferences refs;
     for (int c = 0; c < model_proto.constraints_size(); ++c) {
       const ConstraintProto& ct = model_proto.constraints(c);
       refs = GetReferencesUsedByConstraint(ct);
       for (const int ref : refs.variables) {
         used_variables.insert(PositiveRef(ref));
+      }
+
+      // We always add a linear relaxation for circuit/route except for
+      // linearization level zero.
+      if (some_linerization) {
+        if (ct.constraint_case() == ConstraintProto::kCircuit) {
+          for (const int ref : ct.circuit().literals()) {
+            used_variables.insert(PositiveRef(ref));
+          }
+        } else if (ct.constraint_case() == ConstraintProto::kRoutes) {
+          for (const int ref : ct.routes().literals()) {
+            used_variables.insert(PositiveRef(ref));
+          }
+        }
       }
     }
 
@@ -1253,6 +1270,27 @@ void LoadLinearConstraint(const ConstraintProto& ct, Model* m) {
     max_sum += std::max(term_a, term_b);
   }
 
+  // Load conditional precedences.
+  const SatParameters& params = *m->GetOrCreate<SatParameters>();
+  if (params.auto_detect_greater_than_at_least_one_of() &&
+      ct.enforcement_literal().size() == 1 && vars.size() <= 2) {
+    // To avoid overflow in the code below, we tighten the bounds.
+    int64_t rhs_min = ct.linear().domain(0);
+    int64_t rhs_max = ct.linear().domain(ct.linear().domain().size() - 1);
+    rhs_min = std::max(rhs_min, min_sum.value());
+    rhs_max = std::min(rhs_max, max_sum.value());
+
+    auto* detector = m->GetOrCreate<GreaterThanAtLeastOneOfDetector>();
+    const Literal lit = mapping->Literal(ct.enforcement_literal(0));
+    const Domain domain = ReadDomainFromProto(ct.linear());
+    if (vars.size() == 1) {
+      detector->Add(lit, {vars[0], coeffs[0]}, {}, rhs_min, rhs_max);
+    } else if (vars.size() == 2) {
+      detector->Add(lit, {vars[0], coeffs[0]}, {vars[1], coeffs[1]}, rhs_min,
+                    rhs_max);
+    }
+  }
+
   // Load precedences.
   if (!HasEnforcementLiteral(ct)) {
     auto* precedences = m->GetOrCreate<PrecedenceRelations>();
@@ -1311,7 +1349,6 @@ void LoadLinearConstraint(const ConstraintProto& ct, Model* m) {
     }
   }
 
-  const SatParameters& params = *m->GetOrCreate<SatParameters>();
   const IntegerValue domain_size_limit(
       params.max_domain_size_when_encoding_eq_neq_constraints());
   if (ct.linear().vars_size() == 2 && !integer_trail->IsFixed(vars[0]) &&
@@ -1364,39 +1401,27 @@ void LoadLinearConstraint(const ConstraintProto& ct, Model* m) {
   }
 
   if (ct.linear().domain_size() == 2) {
-    int64_t lb = ct.linear().domain(0);
-    int64_t ub = ct.linear().domain(1);
-    if (min_sum >= lb) lb = std::numeric_limits<int64_t>::min();
-    if (max_sum <= ub) ub = std::numeric_limits<int64_t>::max();
-
-    if (!HasEnforcementLiteral(ct)) {
-      if (all_booleans) {
-        // TODO(user): we should probably also implement an
-        // half-reified version of this constraint.
-        std::vector<LiteralWithCoeff> cst;
-        for (int i = 0; i < vars.size(); ++i) {
-          const int ref = ct.linear().vars(i);
-          cst.push_back({mapping->Literal(ref), coeffs[i]});
-        }
-        m->Add(BooleanLinearConstraint(lb, ub, &cst));
-      } else {
-        if (lb != std::numeric_limits<int64_t>::min()) {
-          m->Add(WeightedSumGreaterOrEqual(vars, coeffs, lb));
-        }
-        if (ub != std::numeric_limits<int64_t>::max()) {
-          m->Add(WeightedSumLowerOrEqual(vars, coeffs, ub));
-        }
+    const int64_t lb = ct.linear().domain(0);
+    const int64_t ub = ct.linear().domain(1);
+    const std::vector<Literal> enforcement_literals =
+        mapping->Literals(ct.enforcement_literal());
+    if (all_booleans && enforcement_literals.empty()) {
+      // TODO(user): we should probably also implement an
+      // half-reified version of this constraint.
+      std::vector<LiteralWithCoeff> cst;
+      for (int i = 0; i < vars.size(); ++i) {
+        const int ref = ct.linear().vars(i);
+        cst.push_back({mapping->Literal(ref), coeffs[i]});
       }
+      m->GetOrCreate<SatSolver>()->AddLinearConstraint(
+          /*use_lower_bound=*/(min_sum < lb), lb,
+          /*use_upper_bound=*/(max_sum > ub), ub, &cst);
     } else {
-      const std::vector<Literal> enforcement_literals =
-          mapping->Literals(ct.enforcement_literal());
-      if (lb != std::numeric_limits<int64_t>::min()) {
-        m->Add(ConditionalWeightedSumGreaterOrEqual(enforcement_literals, vars,
-                                                    coeffs, lb));
+      if (min_sum < lb) {
+        AddWeightedSumGreaterOrEqual(enforcement_literals, vars, coeffs, lb, m);
       }
-      if (ub != std::numeric_limits<int64_t>::max()) {
-        m->Add(ConditionalWeightedSumLowerOrEqual(enforcement_literals, vars,
-                                                  coeffs, ub));
+      if (max_sum > ub) {
+        AddWeightedSumLowerOrEqual(enforcement_literals, vars, coeffs, ub, m);
       }
     }
     return;
@@ -1443,12 +1468,10 @@ void LoadLinearConstraint(const ConstraintProto& ct, Model* m) {
     for_enumeration.push_back(subdomain_literal);
 
     if (min_sum < lb) {
-      m->Add(ConditionalWeightedSumGreaterOrEqual({subdomain_literal}, vars,
-                                                  coeffs, lb));
+      AddWeightedSumGreaterOrEqual({subdomain_literal}, vars, coeffs, lb, m);
     }
     if (max_sum > ub) {
-      m->Add(ConditionalWeightedSumLowerOrEqual({subdomain_literal}, vars,
-                                                coeffs, ub));
+      AddWeightedSumLowerOrEqual({subdomain_literal}, vars, coeffs, ub, m);
     }
   }
 
@@ -1502,8 +1525,8 @@ void LoadIntProdConstraint(const ConstraintProto& ct, Model* m) {
     case 0: {
       auto* integer_trail = m->GetOrCreate<IntegerTrail>();
       auto* sat_solver = m->GetOrCreate<SatSolver>();
-      if (!integer_trail->Enqueue(prod.LowerOrEqual(1), {}) ||
-          !integer_trail->Enqueue(prod.GreaterOrEqual(1), {})) {
+      if (!integer_trail->Enqueue(prod.LowerOrEqual(1)) ||
+          !integer_trail->Enqueue(prod.GreaterOrEqual(1))) {
         sat_solver->NotifyThatModelIsUnsat();
       }
       break;
@@ -1631,7 +1654,7 @@ void LoadCircuitConstraint(const ConstraintProto& ct, Model* m) {
   std::vector<Literal> literals =
       m->GetOrCreate<CpModelMapping>()->Literals(circuit.literals());
   const int num_nodes = ReindexArcs(&tails, &heads);
-  m->Add(SubcircuitConstraint(num_nodes, tails, heads, literals));
+  LoadSubcircuitConstraint(num_nodes, tails, heads, literals, m);
 }
 
 void LoadRoutesConstraint(const ConstraintProto& ct, Model* m) {
@@ -1643,8 +1666,8 @@ void LoadRoutesConstraint(const ConstraintProto& ct, Model* m) {
   std::vector<Literal> literals =
       m->GetOrCreate<CpModelMapping>()->Literals(routes.literals());
   const int num_nodes = ReindexArcs(&tails, &heads);
-  m->Add(SubcircuitConstraint(num_nodes, tails, heads, literals,
-                              /*multiple_subcircuit_through_zero=*/true));
+  LoadSubcircuitConstraint(num_nodes, tails, heads, literals, m,
+                           /*multiple_subcircuit_through_zero=*/true);
 }
 
 bool LoadConstraint(const ConstraintProto& ct, Model* m) {

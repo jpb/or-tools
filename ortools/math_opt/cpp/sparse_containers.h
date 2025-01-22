@@ -20,12 +20,8 @@
 #include <cstdint>
 
 #include "absl/container/flat_hash_map.h"
-#include "absl/strings/string_view.h"
-#include "absl/types/span.h"
 #include "ortools/base/logging.h"
-#include "ortools/base/status_builder.h"
-#include "ortools/base/status_macros.h"
-#include "ortools/math_opt/core/sparse_vector_view.h"
+#include "ortools/math_opt/constraints/quadratic/quadratic_constraint.h"
 #include "ortools/math_opt/cpp/basis_status.h"
 #include "ortools/math_opt/cpp/linear_constraint.h"
 #include "ortools/math_opt/cpp/objective.h"
@@ -33,9 +29,6 @@
 #include "ortools/math_opt/solution.pb.h"
 #include "ortools/math_opt/sparse_containers.pb.h"
 #include "ortools/math_opt/storage/model_storage.h"
-#include "ortools/math_opt/validators/ids_validator.h"
-#include "ortools/math_opt/validators/sparse_vector_validator.h"
-#include "ortools/util/status_macros.h"
 
 namespace operations_research::math_opt {
 
@@ -44,12 +37,22 @@ namespace operations_research::math_opt {
 // Requires that (or returns a status error):
 //  * vars_proto.ids and vars_proto.values have equal size.
 //  * vars_proto.ids is sorted.
-//  * vars_proto.ids has elements in [0, max(int64_t)).
-//  * vars_proto.ids has elements that are variables in `model`.
+//  * vars_proto.ids has elements that are variables in `model` (this implies
+//    that each id is in [0, max(int64_t))).
 //
 // Note that the values of vars_proto.values are not checked (it may have NaNs).
 absl::StatusOr<VariableMap<double>> VariableValuesFromProto(
     const ModelStorage* model, const SparseDoubleVectorProto& vars_proto);
+
+// Returns the VariableMap<int32_t> equivalent to `vars_proto`.
+//
+// Requires that (or returns a status error):
+//  * vars_proto.ids and vars_proto.values have equal size.
+//  * vars_proto.ids is sorted.
+//  * vars_proto.ids has elements that are variables in `model` (this implies
+//    that each id is in [0, max(int64_t))).
+absl::StatusOr<VariableMap<int32_t>> VariableValuesFromProto(
+    const ModelStorage* model, const SparseInt32VectorProto& vars_proto);
 
 // Returns the proto equivalent of variable_values.
 SparseDoubleVectorProto VariableValuesToProto(
@@ -79,8 +82,8 @@ google::protobuf::Map<int64_t, double> AuxiliaryObjectiveValuesToProto(
 // Requires that (or returns a status error):
 //  * lin_cons_proto.ids and lin_cons_proto.values have equal size.
 //  * lin_cons_proto.ids is sorted.
-//  * lin_cons_proto.ids has elements in [0, max(int64_t)).
-//  * lin_cons_proto.ids has elements that are linear constraints in `model`.
+//  * lin_cons_proto.ids has elements that are linear constraints in `model`
+//    (this implies that each id is in [0, max(int64_t))).
 //
 // Note that the values of lin_cons_proto.values are not checked (it may have
 // NaNs).
@@ -91,13 +94,33 @@ absl::StatusOr<LinearConstraintMap<double>> LinearConstraintValuesFromProto(
 SparseDoubleVectorProto LinearConstraintValuesToProto(
     const LinearConstraintMap<double>& linear_constraint_values);
 
+// Returns the absl::flat_hash_map<QuadraticConstraint, double> equivalent to
+// `quad_cons_proto`.
+//
+// Requires that (or returns a status error):
+//  * quad_cons_proto.ids and quad_cons_proto.values have equal size.
+//  * quad_cons_proto.ids is sorted.
+//  * quad_cons_proto.ids has elements that are quadratic constraints in `model`
+//    (this implies that each id is in [0, max(int64_t))).
+//
+// Note that the values of quad_cons_proto.values are not checked (it may have
+// NaNs).
+absl::StatusOr<absl::flat_hash_map<QuadraticConstraint, double>>
+QuadraticConstraintValuesFromProto(
+    const ModelStorage* model, const SparseDoubleVectorProto& quad_cons_proto);
+
+// Returns the proto equivalent of quadratic_constraint_values.
+SparseDoubleVectorProto QuadraticConstraintValuesToProto(
+    const absl::flat_hash_map<QuadraticConstraint, double>&
+        quadratic_constraint_values);
+
 // Returns the VariableMap<BasisStatus> equivalent to `basis_proto`.
 //
 // Requires that (or returns a status error):
 //  * basis_proto.ids and basis_proto.values have equal size.
 //  * basis_proto.ids is sorted.
-//  * basis_proto.ids has elements in [0, max(int64_t)).
-//  * basis_proto.ids has elements that are variables in `model`.
+//  * basis_proto.ids has elements that are variables in `model` (this implies
+//    that each id is in [0, max(int64_t))).
 //  * basis_proto.values does not contain UNSPECIFIED and has valid enum values.
 absl::StatusOr<VariableMap<BasisStatus>> VariableBasisFromProto(
     const ModelStorage* model, const SparseBasisStatusVector& basis_proto);
@@ -111,8 +134,8 @@ SparseBasisStatusVector VariableBasisToProto(
 // Requires that (or returns a status error):
 //  * basis_proto.ids and basis_proto.values have equal size.
 //  * basis_proto.ids is sorted.
-//  * basis_proto.ids has elements in [0, max(int64_t)).
-//  * basis_proto.ids has elements that are linear constraints in `model`.
+//  * basis_proto.ids has elements that are linear constraints in `model` (this
+//    implies that each id is in [0, max(int64_t))).
 //  * basis_proto.values does not contain UNSPECIFIED and has valid enum values.
 absl::StatusOr<LinearConstraintMap<BasisStatus>> LinearConstraintBasisFromProto(
     const ModelStorage* model, const SparseBasisStatusVector& basis_proto);

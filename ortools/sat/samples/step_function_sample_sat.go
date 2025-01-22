@@ -45,13 +45,13 @@ func stepFunctionSampleSat() error {
 
 	// expr == 0 on [5, 6] U [8, 10]
 	b0 := model.NewBoolVar()
-	d0 := cpmodel.FromValues([]int64_t{5, 6, 8, 9, 10})
+	d0 := cpmodel.FromValues([]int64{5, 6, 8, 9, 10})
 	model.AddLinearConstraintForDomain(x, d0).OnlyEnforceIf(b0)
 	model.AddEquality(expr, cpmodel.NewConstant(0)).OnlyEnforceIf(b0)
 
 	// expr == 2 on [0, 1] U [3, 4] U [11, 20]
 	b2 := model.NewBoolVar()
-	d2 := cpmodel.FromIntervals([]cpmodel.ClosedInterval{{0, 1}, {3, 4}, {11, 20}})
+	d2 := cpmodel.FromIntervals([]cpmodel.ClosedInterval{{Start: 0, End: 1}, {Start: 3, End: 4}, {Start: 11, End: 20}})
 	model.AddLinearConstraintForDomain(x, d2).OnlyEnforceIf(b2)
 	model.AddEquality(expr, cpmodel.NewConstant(2)).OnlyEnforceIf(b2)
 

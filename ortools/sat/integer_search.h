@@ -29,6 +29,7 @@
 #include <vector>
 
 #include "absl/container/flat_hash_set.h"
+#include "absl/types/span.h"
 #include "ortools/sat/clause.h"
 #include "ortools/sat/cp_model.pb.h"
 #include "ortools/sat/implied_bounds.h"
@@ -174,6 +175,12 @@ std::function<BooleanOrIntegerLiteral()> FirstUnassignedVarAtItsMinHeuristic(
 // Choose the variable with most fractional LP value.
 std::function<BooleanOrIntegerLiteral()> MostFractionalHeuristic(Model* model);
 
+// Variant used for LbTreeSearch experimentation. Note that each decision is in
+// O(num_variables), but it is kind of ok with LbTreeSearch as we only call this
+// for "new" decision, not when we move around in the tree.
+std::function<BooleanOrIntegerLiteral()> BoolPseudoCostHeuristic(Model* model);
+std::function<BooleanOrIntegerLiteral()> LpPseudoCostHeuristic(Model* model);
+
 // Decision heuristic for SolveIntegerProblemWithLazyEncoding(). Like
 // FirstUnassignedVarAtItsMinHeuristic() but the function will return the
 // literal corresponding to the fact that the currently non-assigned variable
@@ -255,7 +262,7 @@ std::function<bool()> SatSolverRestartPolicy(Model* model);
 // Concatenates each input_heuristic with a default heuristic that instantiate
 // all the problem's Boolean variables, into a new vector.
 std::vector<std::function<BooleanOrIntegerLiteral()>> CompleteHeuristics(
-    const std::vector<std::function<BooleanOrIntegerLiteral()>>&
+    absl::Span<const std::function<BooleanOrIntegerLiteral()>>
         incomplete_heuristics,
     const std::function<BooleanOrIntegerLiteral()>& completion_heuristic);
 
@@ -274,6 +281,10 @@ class IntegerSearchHelper {
   // Returns false if a conflict was found while trying to take a decision.
   bool GetDecision(const std::function<BooleanOrIntegerLiteral()>& f,
                    LiteralIndex* decision);
+
+  // Inner function used by GetDecision().
+  // It will create a new associated literal if needed.
+  LiteralIndex GetDecisionLiteral(const BooleanOrIntegerLiteral& decision);
 
   // Functions passed to GetDecision() might call this to notify a conflict
   // was detected.
@@ -309,7 +320,6 @@ class IntegerSearchHelper {
   TimeLimit* time_limit_;
   PseudoCosts* pseudo_costs_;
   Inprocessing* inprocessing_;
-  IntegerVariable objective_var_ = kNoIntegerVariable;
 
   bool must_process_conflict_ = false;
 };

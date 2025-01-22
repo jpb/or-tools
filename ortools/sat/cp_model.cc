@@ -497,7 +497,7 @@ Constraint Constraint::WithName(absl::string_view name) {
   return *this;
 }
 
-const std::string& Constraint::Name() const { return proto_->name(); }
+absl::string_view Constraint::Name() const { return proto_->name(); }
 
 Constraint Constraint::OnlyEnforceIf(absl::Span<const BoolVar> literals) {
   for (const BoolVar& var : literals) {
@@ -724,8 +724,6 @@ IntervalVar CpModelBuilder::NewOptionalIntervalVar(const LinearExpr& start,
                                                    const LinearExpr& size,
                                                    const LinearExpr& end,
                                                    BoolVar presence) {
-  AddEquality(LinearExpr(start) + size, end).OnlyEnforceIf(presence);
-
   const int index = cp_model_.constraints_size();
   ConstraintProto* const ct = cp_model_.add_constraints();
   ct->add_enforcement_literal(presence.index_);

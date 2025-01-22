@@ -16,7 +16,6 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
-#include <functional>
 #include <limits>
 #include <memory>
 #include <string>
@@ -76,7 +75,6 @@ SatSolver::SatSolver(Model* model)
       clause_activity_increment_(1.0),
       same_reason_identifier_(*trail_),
       is_relevant_for_core_computation_(true),
-      problem_is_pure_sat_(true),
       drat_proof_handler_(nullptr),
       stats_("SatSolver") {
   InitializePropagators();
@@ -109,6 +107,8 @@ int64_t SatSolver::num_failures() const { return counters_.num_failures; }
 int64_t SatSolver::num_propagations() const {
   return trail_->NumberOfEnqueues() - counters_.num_branches;
 }
+
+int64_t SatSolver::num_backtracks() const { return counters_.num_backtracks; }
 
 int64_t SatSolver::num_restarts() const { return counters_.num_restarts; }
 
@@ -273,7 +273,7 @@ bool SatSolver::AddProblemClauseInternal(absl::Span<const Literal> literals) {
       AddBinaryClauseInternal(literals[0], literals[1]);
     }
   } else {
-    if (!clauses_propagator_->AddClause(literals, trail_)) {
+    if (!clauses_propagator_->AddClause(literals, trail_, /*lbd=*/-1)) {
       return SetModelUnsat();
     }
   }
@@ -317,8 +317,6 @@ bool SatSolver::AddLinearConstraintInternal(
     }
     return true;
   }
-
-  problem_is_pure_sat_ = false;
 
   // TODO(user): If this constraint forces all its literal to false (when rhs is
   // zero for instance), we still add it. Optimize this?
@@ -432,21 +430,20 @@ int SatSolver::AddLearnedClauseAndEnqueueUnitPropagation(
     --num_learned_clause_before_cleanup_;
 
     SatClause* clause =
-        clauses_propagator_->AddRemovableClause(literals, trail_);
+        clauses_propagator_->AddRemovableClause(literals, trail_, lbd);
 
     // BumpClauseActivity() must be called after clauses_info_[clause] has
     // been created or it will have no effect.
     (*clauses_propagator_->mutable_clauses_info())[clause].lbd = lbd;
     BumpClauseActivity(clause);
   } else {
-    CHECK(clauses_propagator_->AddClause(literals, trail_));
+    CHECK(clauses_propagator_->AddClause(literals, trail_, lbd));
   }
   return lbd;
 }
 
 void SatSolver::AddPropagator(SatPropagator* propagator) {
   CHECK_EQ(CurrentDecisionLevel(), 0);
-  problem_is_pure_sat_ = false;
   trail_->RegisterPropagator(propagator);
   external_propagators_.push_back(propagator);
   InitializePropagators();
@@ -455,7 +452,6 @@ void SatSolver::AddPropagator(SatPropagator* propagator) {
 void SatSolver::AddLastPropagator(SatPropagator* propagator) {
   CHECK_EQ(CurrentDecisionLevel(), 0);
   CHECK(last_propagator_ == nullptr);
-  problem_is_pure_sat_ = false;
   trail_->RegisterPropagator(propagator);
   last_propagator_ = propagator;
   InitializePropagators();
@@ -1044,11 +1040,13 @@ void SatSolver::Backtrack(int target_level) {
   // that will cause some problems. Note that we could forbid a user to call
   // Backtrack() with the current level, but that is annoying when you just
   // want to reset the solver with Backtrack(0).
-  if (CurrentDecisionLevel() == target_level) return;
+  DCHECK(target_level == 0 || !Decisions().empty());
+  if (CurrentDecisionLevel() == target_level || Decisions().empty()) return;
   DCHECK_GE(target_level, 0);
   DCHECK_LE(target_level, CurrentDecisionLevel());
 
   // Any backtrack to the root from a positive one is counted as a restart.
+  counters_.num_backtracks++;
   if (target_level == 0) counters_.num_restarts++;
 
   // Per the SatPropagator interface, this is needed before calling Untrail.
@@ -1864,32 +1862,39 @@ bool SatSolver::Propagate() {
   SCOPED_TIME_STAT(&stats_);
   DCHECK(!ModelIsUnsat());
 
-  // Because we might potentially iterate often on this list below, we remove
-  // empty propagators.
-  //
-  // TODO(user): This might not really be needed.
-  non_empty_propagators_.clear();
-  for (SatPropagator* propagator : propagators_) {
-    if (!propagator->IsEmpty()) {
-      non_empty_propagators_.push_back(propagator);
-    }
-  }
-
   while (true) {
-    // The idea here is to abort the inspection as soon as at least one
-    // propagation occurs so we can loop over and test again the highest
-    // priority constraint types using the new information.
+    // Because we might potentially iterate often on this list below, we remove
+    // empty propagators.
     //
-    // Note that the first propagators_ should be the binary_implication_graph_
-    // and that its Propagate() functions will not abort on the first
-    // propagation to be slightly more efficient.
-    const int old_index = trail_->Index();
-    for (SatPropagator* propagator : non_empty_propagators_) {
-      DCHECK(propagator->PropagatePreconditionsAreSatisfied(*trail_));
-      if (!propagator->Propagate(trail_)) return false;
-      if (trail_->Index() > old_index) break;
+    // TODO(user): This might not really be needed.
+    non_empty_propagators_.clear();
+    for (SatPropagator* propagator : propagators_) {
+      if (!propagator->IsEmpty()) {
+        non_empty_propagators_.push_back(propagator);
+      }
     }
-    if (trail_->Index() == old_index) break;
+
+    while (true) {
+      // The idea here is to abort the inspection as soon as at least one
+      // propagation occurs so we can loop over and test again the highest
+      // priority constraint types using the new information.
+      //
+      // Note that the first propagators_ should be the
+      // binary_implication_graph_ and that its Propagate() functions will not
+      // abort on the first propagation to be slightly more efficient.
+      const int old_index = trail_->Index();
+      for (SatPropagator* propagator : non_empty_propagators_) {
+        DCHECK(propagator->PropagatePreconditionsAreSatisfied(*trail_));
+        if (!propagator->Propagate(trail_)) return false;
+        if (trail_->Index() > old_index) break;
+      }
+      if (trail_->Index() == old_index) break;
+    }
+
+    // In some corner cases, we might add new constraint during propagation,
+    // which might trigger new propagator addition or some propagator to become
+    // non-empty() now.
+    if (PropagationIsDone()) return true;
   }
   return true;
 }
@@ -2022,6 +2027,7 @@ void SatSolver::ComputeFirstUIPConflict(
     std::vector<Literal>* reason_used_to_infer_the_conflict,
     std::vector<SatClause*>* subsumed_clauses) {
   SCOPED_TIME_STAT(&stats_);
+  const int64_t conflict_id = counters_.num_failures;
 
   // This will be used to mark all the literals inspected while we process the
   // conflict and the reasons behind each of its variable assignments.
@@ -2129,7 +2135,7 @@ void SatSolver::ComputeFirstUIPConflict(
             literal.Variable()) != literal.Variable()) {
       clause_to_expand = {};
     } else {
-      clause_to_expand = trail_->Reason(literal.Variable());
+      clause_to_expand = trail_->Reason(literal.Variable(), conflict_id);
     }
     sat_clause = ReasonClauseOrNull(literal.Variable());
 

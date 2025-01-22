@@ -60,6 +60,8 @@ from ortools.math_opt.python.compute_infeasible_subsystem_result import (
 from ortools.math_opt.python.compute_infeasible_subsystem_result import (
     parse_model_subset_bounds,
 )
+from ortools.math_opt.python.errors import InternalMathOptError
+from ortools.math_opt.python.errors import status_proto_to_exception
 from ortools.math_opt.python.expressions import evaluate_expression
 from ortools.math_opt.python.expressions import fast_sum
 from ortools.math_opt.python.hash_model_storage import HashModelStorage
@@ -144,9 +146,11 @@ from ortools.math_opt.python.solution import Basis
 from ortools.math_opt.python.solution import BasisStatus
 from ortools.math_opt.python.solution import DualRay
 from ortools.math_opt.python.solution import DualSolution
+from ortools.math_opt.python.solution import optional_solution_status_to_proto
 from ortools.math_opt.python.solution import parse_basis
 from ortools.math_opt.python.solution import parse_dual_ray
 from ortools.math_opt.python.solution import parse_dual_solution
+from ortools.math_opt.python.solution import parse_optional_solution_status
 from ortools.math_opt.python.solution import parse_primal_ray
 from ortools.math_opt.python.solution import parse_primal_solution
 from ortools.math_opt.python.solution import parse_solution

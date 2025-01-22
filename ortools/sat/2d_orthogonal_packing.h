@@ -33,6 +33,7 @@ struct OrthogonalPackingOptions {
   bool use_pairwise = true;
   bool use_dff_f0 = true;
   bool use_dff_f2 = true;
+  int brute_force_threshold = 6;
   int dff2_max_number_of_parameters_to_check = std::numeric_limits<int>::max();
 };
 
@@ -119,6 +120,7 @@ class OrthogonalPackingResult {
     PAIRWISE,
     DFF_F0,
     DFF_F2,
+    BRUTE_FORCE,
   };
 
   Status result_;
@@ -144,6 +146,11 @@ class OrthogonalPackingInfeasibilityDetector {
       const OrthogonalPackingOptions& options = OrthogonalPackingOptions());
 
  private:
+  bool RelaxConflictWithBruteForce(
+      OrthogonalPackingResult& result,
+      std::pair<IntegerValue, IntegerValue> bounding_box_size,
+      int brute_force_threshold);
+
   OrthogonalPackingResult TestFeasibilityImpl(
       absl::Span<const IntegerValue> sizes_x,
       absl::Span<const IntegerValue> sizes_y,
@@ -164,11 +171,9 @@ class OrthogonalPackingInfeasibilityDetector {
   // All sizes must be positive values less than UINT16_MAX.
   // The returned bitset will contain less elements than
   // min(sqrt_bb_size * num_items, x_bb_size/4+1).
-  void GetAllCandidatesForKForDff2(absl::Span<const IntegerValue> sizes_x,
-                                   absl::Span<const IntegerValue> sizes_y,
-                                   IntegerValue x_bb_size,
+  void GetAllCandidatesForKForDff2(absl::Span<const IntegerValue> sizes,
+                                   IntegerValue bb_size,
                                    IntegerValue sqrt_bb_size,
-                                   IntegerValue y_bb_size,
                                    Bitset64<IntegerValue>& candidates);
 
   OrthogonalPackingResult CheckFeasibilityWithDualFunction2(
@@ -190,6 +195,9 @@ class OrthogonalPackingInfeasibilityDetector {
   int64_t num_conflicts_dff2_ = 0;
   int64_t num_conflicts_dff0_ = 0;
   int64_t num_scheduling_possible_ = 0;
+  int64_t num_brute_force_calls_ = 0;
+  int64_t num_brute_force_conflicts_ = 0;
+  int64_t num_brute_force_relaxation_ = 0;
 
   absl::BitGenRef random_;
   SharedStatistics* shared_stats_;

@@ -21,23 +21,21 @@
 #include <string>
 #include <vector>
 
-#include "absl/flags/flag.h"
 #include "absl/random/random.h"
 #include "absl/strings/str_format.h"
+#include "absl/types/span.h"
 #include "benchmark/benchmark.h"
 #include "google/protobuf/text_format.h"
 #include "gtest/gtest.h"
 #include "ortools/base/gmock.h"
 #include "ortools/base/logging.h"
-#include "ortools/base/message_matchers.h"
 #include "ortools/base/path.h"
-#include "ortools/base/status_matchers.h"
 #include "ortools/graph/graph.h"
 #include "ortools/graph/graphs.h"
 #include "ortools/linear_solver/linear_solver.h"
 #include "ortools/util/file_util.h"
 
-ABSL_FLAG(std::string, test_srcdir, "", "REQUIRED: src dir");
+#define ROOT_DIR "com_google_ortools/"
 
 namespace operations_research {
 namespace {
@@ -189,10 +187,9 @@ TEST(SimpleMaxFlowTest, CreateFlowModelProto) {
 TEST(SimpleMaxFlowTest, ProblematicProblemWithMaxCapacity) {
   ASSERT_OK_AND_ASSIGN(
       FlowModelProto model,
-      ReadFileToProto<FlowModelProto>(
-          file::JoinPathRespectAbsolute(absl::GetFlag(FLAGS_test_srcdir),
-          "ortools/graph/"
-          "testdata/max_flow_test1.pb.txt")));
+      ReadFileToProto<FlowModelProto>(file::JoinPathRespectAbsolute(
+          ::testing::SrcDir(), ROOT_DIR "ortools/graph/testdata/"
+                                        "max_flow_test1.pb.txt")));
   SimpleMaxFlow solver;
   EXPECT_EQ(SimpleMaxFlow::OPTIMAL, LoadAndSolveFlowModel(model, &solver));
   EXPECT_EQ(10290243, solver.OptimalFlow());
@@ -489,7 +486,7 @@ void GenerateRandomArcValuations(const Graph& graph, const int64_t max_range,
 }
 
 template <typename Graph>
-void SetUpNetworkData(const std::vector<int64_t>& arc_capacity,
+void SetUpNetworkData(absl::Span<const int64_t> arc_capacity,
                       GenericMaxFlow<Graph>* max_flow) {
   const Graph* graph = max_flow->graph();
   for (typename Graph::ArcIndex arc = 0; arc < graph->num_arcs(); ++arc) {
@@ -589,7 +586,7 @@ void PartialRandomAssignment(typename MaxFlowSolver<Graph>::Solver f,
 }
 
 template <typename Graph>
-void ChangeCapacities(const std::vector<int64_t>& arc_capacity,
+void ChangeCapacities(absl::Span<const int64_t> arc_capacity,
                       FlowQuantity delta, GenericMaxFlow<Graph>* max_flow) {
   const Graph* graph = max_flow->graph();
   for (typename Graph::ArcIndex arc = 0; arc < graph->num_arcs(); ++arc) {

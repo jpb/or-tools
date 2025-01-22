@@ -27,7 +27,6 @@ if(MSVC)
     "/D_CRT_SECURE_NO_WARNINGS"
     "/D_CRT_SECURE_NO_DEPRECATE"
     "/MP" # Build with multiple processes
-    "/DNDEBUG"
     )
   # MSVC warning suppressions
   list(APPEND FLATZINC_COMPILE_OPTIONS
@@ -184,8 +183,8 @@ file(RELATIVE_PATH FZ_REL_INSTALL_BINARY
   ${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_DATADIR}/minizinc/solvers
   ${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_BINDIR}/fzn-cp-sat)
 configure_file(
-  ortools/flatzinc/cpsat.msc.in
-  ${PROJECT_BINARY_DIR}/cpsat.msc
+  ortools/flatzinc/cp-sat.msc.in
+  ${PROJECT_BINARY_DIR}/cp-sat.msc
   @ONLY)
 
 # Install rules
@@ -199,7 +198,7 @@ install(TARGETS flatzinc fzn #fzn-parser_test
   )
 
 install(DIRECTORY ortools/flatzinc/mznlib/
-  DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/minizinc/cpsat
+  DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/minizinc/cp-sat
   FILES_MATCHING PATTERN "*.mzn")
-install(FILES ${PROJECT_BINARY_DIR}/cpsat.msc
+install(FILES ${PROJECT_BINARY_DIR}/cp-sat.msc
   DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/minizinc/solvers)

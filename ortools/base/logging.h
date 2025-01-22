@@ -20,14 +20,12 @@
 #include "absl/log/check.h"
 #include "absl/log/die_if_null.h"
 #include "absl/log/log.h"
+#include "absl/log/vlog_is_on.h"
 #include "absl/memory/memory.h"
 #include "absl/status/status.h"
 #include "absl/strings/str_cat.h"
 #include "absl/strings/string_view.h"
 #include "ortools/base/macros.h"
-
-// Compatibility layer for glog/previous logging code.
-ABSL_DECLARE_FLAG(bool, logtostderr);
 
 // Forward the new flag.
 ABSL_DECLARE_FLAG(int, stderrthreshold);

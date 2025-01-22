@@ -15,13 +15,14 @@
 #include <string>
 #include <vector>
 
-#include "absl/flags/flag.h"
 #include "absl/log/check.h"
 #include "absl/strings/str_cat.h"
+#include "absl/strings/str_join.h"
 #include "absl/time/time.h"
 #include "gtest/gtest.h"
-#include "ortools/algorithms/set_cover.h"
+#include "ortools/algorithms/set_cover_heuristics.h"
 #include "ortools/algorithms/set_cover_invariant.h"
+#include "ortools/algorithms/set_cover_lagrangian.h"
 #include "ortools/algorithms/set_cover_mip.h"
 #include "ortools/algorithms/set_cover_model.h"
 #include "ortools/algorithms/set_cover_reader.h"
@@ -31,51 +32,178 @@
 
 namespace operations_research {
 
-double RunSolver(std::string name, SetCoverModel* model) {
-  SetCoverInvariant inv(model);
+void LogStats(std::string name, SetCoverModel* model) {
+  LOG(INFO) << ", " << name << ", num_elements, " << model->num_elements()
+            << ", num_subsets, " << model->num_subsets();
+  LOG(INFO) << ", " << name << ", num_nonzeros, " << model->num_nonzeros()
+            << ", fill rate, " << model->FillRate();
+  LOG(INFO) << ", " << name << ", cost, "
+            << model->ComputeCostStats().DebugString();
 
+  LOG(INFO) << ", " << name << ", num_rows, " << model->num_elements()
+            << ", rows sizes, " << model->ComputeRowStats().DebugString();
+  LOG(INFO) << ", " << name << ", row size deciles, "
+            << absl::StrJoin(model->ComputeRowDeciles(), ", ");
+  LOG(INFO) << ", " << name << ", num_columns, " << model->num_subsets()
+            << ", columns sizes, " << model->ComputeColumnStats().DebugString();
+  LOG(INFO) << ", " << name << ", column size deciles, "
+            << absl::StrJoin(model->ComputeColumnDeciles(), ", ");
+  SetCoverInvariant inv(model);
+  Preprocessor preprocessor(&inv);
+  preprocessor.NextSolution();
+  LOG(INFO) << ", " << name << ", num_columns_fixed_by_singleton_row, "
+            << preprocessor.num_columns_fixed_by_singleton_row();
+}
+
+void LogCostAndTiming(std::string name, std::string algo, double cost,
+                      absl::Duration duration) {
+  LOG(INFO) << ", " << name << ", " << algo << "_cost, " << cost << ", "
+            << absl::ToInt64Microseconds(duration) << "e-6, s";
+}
+
+SetCoverInvariant RunChvatalAndSteepest(std::string name,
+                                        SetCoverModel* model) {
+  SetCoverInvariant inv(model);
   GreedySolutionGenerator greedy(&inv);
-  WallTimer global_timer;
   WallTimer timer;
-  global_timer.Start();
   timer.Start();
   CHECK(greedy.NextSolution());
-  DCHECK(inv.CheckSolution());
-  LOG(INFO) << name << "_GreedySolutionGenerator_cost, " << inv.cost() << ", "
-            << absl::ToInt64Microseconds(timer.GetDuration()) << ", us";
-  timer.Stop();
-  timer.Reset();
-  timer.Start();
-  operations_research::SteepestSearch steepest(&inv);
+  DCHECK(inv.CheckConsistency());
+  LogCostAndTiming(name, "GreedySolutionGenerator", inv.cost(),
+                   timer.GetDuration());
+  SteepestSearch steepest(&inv);
   steepest.NextSolution(100000);
-  LOG(INFO) << name << "_SteepestSearch_cost, " << inv.cost() << ", "
-            << absl::ToInt64Microseconds(timer.GetDuration()) << ", us";
-  double best_cost = inv.cost();
-  DCHECK(inv.CheckSolution());
-  SubsetBoolVector best_choices = inv.is_selected();
-  std::vector<SubsetIndex> focus = model->all_subsets();
-  timer.Stop();
-  timer.Reset();
+  LogCostAndTiming(name, "GreedySteepestSearch", inv.cost(),
+                   timer.GetDuration());
+  DCHECK(inv.CheckConsistency());
+  return inv;
+}
+
+SetCoverInvariant RunChvatalAndGLS(std::string name, SetCoverModel* model) {
+  SetCoverInvariant inv(model);
+  GreedySolutionGenerator greedy(&inv);
+  WallTimer timer;
   timer.Start();
+  CHECK(greedy.NextSolution());
+  DCHECK(inv.CheckConsistency());
+  LogCostAndTiming(name, "GreedySolutionGenerator", inv.cost(),
+                   timer.GetDuration());
+  GuidedLocalSearch gls(&inv);
+  gls.NextSolution(100'000);
+  LogCostAndTiming(name, "GLS", inv.cost(), timer.GetDuration());
+  DCHECK(inv.CheckConsistency());
+  return inv;
+}
+
+SetCoverInvariant RunElementDegreeGreedyAndSteepest(std::string name,
+                                                    SetCoverModel* model) {
+  SetCoverInvariant inv(model);
+  ElementDegreeSolutionGenerator element_degree(&inv);
+  WallTimer timer;
+  timer.Start();
+  CHECK(element_degree.NextSolution());
+  DCHECK(inv.CheckConsistency());
+  LogCostAndTiming(name, "ElementDegreeSolutionGenerator", inv.cost(),
+                   timer.GetDuration());
+  SteepestSearch steepest(&inv);
+  steepest.NextSolution(100000);
+  LogCostAndTiming(name, "ElementDegreeSteepestSearch", inv.cost(),
+                   timer.GetDuration());
+  DCHECK(inv.CheckConsistency());
+  return inv;
+}
+
+void IterateClearAndMip(std::string name, SetCoverInvariant* inv) {
+  WallTimer timer;
+  timer.Start();
+  std::vector<SubsetIndex> focus = inv->model()->all_subsets();
+  double best_cost = inv->cost();
+  SubsetBoolVector best_choices = inv->is_selected();
   for (int i = 0; i < 10; ++i) {
     std::vector<SubsetIndex> range =
-        ClearMostCoveredElements(std::min(100UL, focus.size()), &inv);
-    SetCoverMip mip(&inv);
-    mip.NextSolution(range);
-    if (inv.cost() < best_cost) {
-      best_cost = inv.cost();
-      best_choices = inv.is_selected();
+        ClearMostCoveredElements(std::min(100UL, focus.size()), inv);
+    SetCoverMip mip(inv);
+    mip.NextSolution(range, true, 0.02);
+    DCHECK(inv->CheckConsistency());
+    if (inv->cost() < best_cost) {
+      best_cost = inv->cost();
+      best_choices = inv->is_selected();
     }
   }
   timer.Stop();
-  LOG(INFO) << name << "_MIP_cost, " << best_cost << ", "
-            << absl::ToInt64Microseconds(timer.GetDuration()) << ", us";
-  global_timer.Stop();
-  LOG(INFO) << name << "_total_running_time, " << best_cost << ", "
-            << absl::ToInt64Microseconds(global_timer.GetDuration())
-            << ", us, total_time";
-  return best_cost;
-  // TODO(user): add guided local search.
+  LogCostAndTiming(name, "IterateClearAndMip", best_cost, timer.GetDuration());
+}
+
+SetCoverInvariant ComputeLPLowerBound(std::string name, SetCoverModel* model) {
+  SetCoverInvariant inv(model);
+  WallTimer timer;
+  timer.Start();
+  SetCoverMip mip(&inv, SetCoverMipSolver::SCIP);  // Use Gurobi for large pbs.
+  mip.NextSolution(false, .3);  // Use 300s or more for large problems.
+  LogCostAndTiming(name, "LPLowerBound", mip.lower_bound(),
+                   timer.GetDuration());
+  return inv;
+}
+
+void ComputeLagrangianLowerBound(std::string name, SetCoverInvariant* inv) {
+  const SetCoverModel* model = inv->model();
+  WallTimer timer;
+  timer.Start();
+  SetCoverLagrangian lagrangian(inv, /*num_threads=*/4);
+  const auto [lower_bound, reduced_costs, multipliers] =
+      lagrangian.ComputeLowerBound(model->subset_costs(), inv->cost());
+  LogCostAndTiming(name, "LagrangianLowerBound", lower_bound,
+                   timer.GetDuration());
+}
+
+SetCoverInvariant RunMip(std::string name, SetCoverModel* model) {
+  SetCoverInvariant inv(model);
+  WallTimer timer;
+  timer.Start();
+  SetCoverMip mip(&inv, SetCoverMipSolver::SCIP);  // Use Gurobi for large pbs.
+  mip.NextSolution(true, .5);  // Use 300s or more for large problems.
+  timer.Stop();
+  LogCostAndTiming(name, "MIP", inv.cost(), timer.GetDuration());
+  return inv;
+}
+
+void IterateClearElementDegreeAndSteepest(std::string name,
+                                          SetCoverInvariant* inv) {
+  WallTimer timer;
+  timer.Start();
+  double best_cost = inv->cost();
+  SubsetBoolVector best_choices = inv->is_selected();
+  ElementDegreeSolutionGenerator element_degree(inv);
+  SteepestSearch steepest(inv);
+  for (int i = 0; i < 1000; ++i) {
+    std::vector<SubsetIndex> range =
+        ClearRandomSubsets(0.1 * inv->trace().size(), inv);
+    CHECK(element_degree.NextSolution());
+    steepest.NextSolution(range, 100000);
+    DCHECK(inv->CheckConsistency());
+    if (inv->cost() < best_cost) {
+      best_cost = inv->cost();
+      best_choices = inv->is_selected();
+    }
+  }
+  timer.Stop();
+  LogCostAndTiming(name, "IterateClearElementDegreeAndSteepest", best_cost,
+                   timer.GetDuration());
+}
+
+double RunSolver(std::string name, SetCoverModel* model) {
+  LogStats(name, model);
+  WallTimer global_timer;
+  global_timer.Start();
+  RunChvatalAndSteepest(name, model);
+  // SetCoverInvariant inv = ComputeLPLowerBound(name, model);
+  RunMip(name, model);
+  RunChvatalAndGLS(name, model);
+  SetCoverInvariant inv = RunElementDegreeGreedyAndSteepest(name, model);
+  ComputeLagrangianLowerBound(name, &inv);
+  //  IterateClearAndMip(name, inv);
+  IterateClearElementDegreeAndSteepest(name, &inv);
+  return inv.cost();
 }
 
 // We break down the ORLIB set covering problems by their expected runtime with
@@ -122,26 +250,26 @@ const char data_dir[] =
 
 #define ORLIB_TEST(name, best_objective, expected_objective, size, function) \
   TEST(OrlibTest, APPEND_AND_EVAL(TestOnLine, __LINE__)) {                   \
-    auto filespec = file::JoinPathRespectAbsolute(                           \
-        absl::GetFlag(FLAGS_test_srcdir), data_dir, name);                   \
+    auto filespec =                                                          \
+        file::JoinPathRespectAbsolute(::testing::SrcDir(), data_dir, name);  \
     LOG(INFO) << "Reading " << name;                                         \
     operations_research::SetCoverModel model = function(filespec);           \
     double cost = RunSolver(name, &model);                                   \
     (void)cost;                                                              \
   }
 
-#define ORLIB_UNICOST_TEST(name, best_objective, expected_objective, size, \
-                           function)                                       \
-  TEST(OrlibUnicostTest, APPEND_AND_EVAL(TestOnLine, __LINE__)) {          \
-    auto filespec = file::JoinPathRespectAbsolute(                         \
-        absl::GetFlag(FLAGS_test_srcdir), data_dir, name);                 \
-    LOG(INFO) << "Reading " << name;                                       \
-    operations_research::SetCoverModel model = function(filespec);         \
-    for (int i = 0; i < model.num_subsets(); ++i) {                        \
-      model.SetSubsetCost(i, 1.0);                                         \
-    }                                                                      \
-    double cost = RunSolver(absl::StrCat(name, "_unicost"), &model);       \
-    (void)cost;                                                            \
+#define ORLIB_UNICOST_TEST(name, best_objective, expected_objective, size,  \
+                           function)                                        \
+  TEST(OrlibUnicostTest, APPEND_AND_EVAL(TestOnLine, __LINE__)) {           \
+    auto filespec =                                                         \
+        file::JoinPathRespectAbsolute(::testing::SrcDir(), data_dir, name); \
+    LOG(INFO) << "Reading " << name;                                        \
+    operations_research::SetCoverModel model = function(filespec);          \
+    for (SubsetIndex i : model.SubsetRange()) {                             \
+      model.SetSubsetCost(i, 1.0);                                          \
+    }                                                                       \
+    double cost = RunSolver(absl::StrCat(name, "_unicost"), &model);        \
+    (void)cost;                                                             \
   }
 
 #define SCP_TEST(name, best_objective, expected_objective, size)     \
@@ -156,6 +284,11 @@ const char data_dir[] =
   ORLIB_UNICOST_TEST(name, best_objective, expected_objective, size, \
                      operations_research::ReadRailSetCoverProblem)
 
+#define BASIC_SCP
+#define EXTRA_SCP
+#define RAIL
+
+#ifdef BASIC_SCP
 SCP_TEST("scp41.txt", 429, 442, FEWMILLIS);
 SCP_TEST("scp42.txt", 512, 555, FEWMILLIS);
 SCP_TEST("scp43.txt", 516, 557, FEWMILLIS);
@@ -237,15 +370,9 @@ SCP_TEST("scpnrh2.txt", 63, 70, FEWTENTHS);
 SCP_TEST("scpnrh3.txt", 59, 65, FEWTENTHS);
 SCP_TEST("scpnrh4.txt", 58, 66, FEWTENTHS);
 SCP_TEST("scpnrh5.txt", 55, 62, FEWTENTHS);
+#endif
 
-RAIL_TEST("rail507.txt", 174, 218, FEWTENTHS);
-RAIL_TEST("rail516.txt", 182, 204, FEWTENTHS);
-RAIL_TEST("rail582.txt", 211, 250, FEWTENTHS);
-RAIL_TEST("rail2536.txt", 691, 889, MANYSECONDS);
-RAIL_TEST("rail2586.txt", 952, 1139, MANYSECONDS);
-RAIL_TEST("rail4284.txt", 1065, 1362, MANYSECONDS);
-RAIL_TEST("rail4872.txt", 1527, 1861, MANYSECONDS);  // [2]
-
+#ifdef EXTRA_SCP
 SCP_TEST("scpclr10.txt", 0, 32, FEWMILLIS);
 SCP_TEST("scpclr11.txt", 0, 30, FEWMILLIS);
 SCP_TEST("scpclr12.txt", 0, 31, FEWMILLIS);
@@ -257,6 +384,21 @@ SCP_TEST("scpcyc08.txt", 0, 360, FEWMILLIS);
 SCP_TEST("scpcyc09.txt", 0, 816, SUBHUNDREDTH);
 SCP_TEST("scpcyc10.txt", 0, 1920, FEWHUNDREDTHS);
 SCP_TEST("scpcyc11.txt", 0, 4284, SUBTENTH);
+#endif
+
+#ifdef RAIL
+RAIL_TEST("rail507.txt", 174, 218, FEWTENTHS);
+RAIL_TEST("rail516.txt", 182, 204, FEWTENTHS);
+RAIL_TEST("rail582.txt", 211, 250, FEWTENTHS);
+RAIL_TEST("rail2536.txt", 691, 889, MANYSECONDS);
+RAIL_TEST("rail2586.txt", 952, 1139, MANYSECONDS);
+RAIL_TEST("rail4284.txt", 1065, 1362, MANYSECONDS);
+RAIL_TEST("rail4872.txt", 1527, 1861, MANYSECONDS);  // [2]
+#endif
+
+#undef BASIC_SCP
+#undef EXTRA_SCP
+#undef RAIL
 
 #undef ORLIB_TEST
 #undef ORLIB_UNICOST_TEST

@@ -14,6 +14,7 @@
 #include "ortools/sat/pb_constraint.h"
 
 #include <algorithm>
+#include <cstdint>
 #include <memory>
 #include <string>
 #include <utility>
@@ -114,7 +115,7 @@ bool ComputeBooleanLinearExpressionCanonicalForm(
 }
 
 bool ApplyLiteralMapping(
-    const absl::StrongVector<LiteralIndex, LiteralIndex>& mapping,
+    const util_intops::StrongVector<LiteralIndex, LiteralIndex>& mapping,
     std::vector<LiteralWithCoeff>* cst, Coefficient* bound_shift,
     Coefficient* max_value) {
   int index = 0;
@@ -976,7 +977,8 @@ void PbConstraints::Untrail(const Trail& trail, int trail_index) {
 }
 
 absl::Span<const Literal> PbConstraints::Reason(const Trail& trail,
-                                                int trail_index) const {
+                                                int trail_index,
+                                                int64_t /*conflict_id*/) const {
   SCOPED_TIME_STAT(&stats_);
   const PbConstraintsEnqueueHelper::ReasonInfo& reason_info =
       enqueue_helper_.reasons[trail_index];
@@ -1099,7 +1101,7 @@ void PbConstraints::UpdateActivityIncrement() {
 }
 
 void PbConstraints::DeleteConstraintMarkedForDeletion() {
-  absl::StrongVector<ConstraintIndex, ConstraintIndex> index_mapping(
+  util_intops::StrongVector<ConstraintIndex, ConstraintIndex> index_mapping(
       constraints_.size(), ConstraintIndex(-1));
   ConstraintIndex new_index(0);
   for (ConstraintIndex i(0); i < constraints_.size(); ++i) {

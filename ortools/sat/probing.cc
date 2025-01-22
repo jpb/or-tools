@@ -300,7 +300,7 @@ bool Prober::ProbeBooleanVariables(
 }
 
 bool Prober::ProbeDnf(absl::string_view name,
-                      const std::vector<std::vector<Literal>>& dnf) {
+                      absl::Span<const std::vector<Literal>> dnf) {
   if (dnf.size() <= 1) return true;
 
   // Reset the solver in case it was already used.
@@ -498,7 +498,7 @@ bool LookForTrivialSatSolution(double deterministic_time_limit, Model* model,
 bool FailedLiteralProbingRound(ProbingOptions options, Model* model) {
   WallTimer wall_timer;
   wall_timer.Start();
-  options.log_info |= VLOG_IS_ON(2);
+  options.log_info |= VLOG_IS_ON(1);
 
   // Reset the solver in case it was already used.
   auto* sat_solver = model->GetOrCreate<SatSolver>();
@@ -540,10 +540,10 @@ bool FailedLiteralProbingRound(ProbingOptions options, Model* model) {
     bool operator<(const SavedNextLiteral& o) const { return rank < o.rank; }
   };
   std::vector<SavedNextLiteral> queue;
-  absl::StrongVector<LiteralIndex, int> position_in_order;
+  util_intops::StrongVector<LiteralIndex, int> position_in_order;
 
   // This is only needed when options use_queue is false;
-  absl::StrongVector<LiteralIndex, int> starts;
+  util_intops::StrongVector<LiteralIndex, int> starts;
   if (!options.use_queue) starts.resize(2 * num_variables, 0);
 
   // We delay fixing of already assigned literal once we go back to level

@@ -224,10 +224,26 @@ bool LinearExpressionProtosAreEqual(const LinearExpressionProto& a,
                                     const LinearExpressionProto& b,
                                     int64_t b_scaling = 1);
 
+// Returns true if there exactly one variable appearing in all the expressions.
+template <class ExpressionList>
+bool ExpressionsContainsOnlyOneVar(const ExpressionList& exprs) {
+  int unique_var = -1;
+  for (const LinearExpressionProto& expr : exprs) {
+    for (const int var : expr.vars()) {
+      CHECK(RefIsPositive(var));
+      if (unique_var == -1) {
+        unique_var = var;
+      } else if (var != unique_var) {
+        return false;
+      }
+    }
+  }
+  return unique_var != -1;
+}
+
 // Default seed for fingerprints.
 constexpr uint64_t kDefaultFingerprintSeed = 0xa5b85c5e198ed849;
 
-// T must be castable to uint64_t.
 template <class T>
 inline uint64_t FingerprintRepeatedField(
     const google::protobuf::RepeatedField<T>& sequence, uint64_t seed) {
@@ -236,7 +252,6 @@ inline uint64_t FingerprintRepeatedField(
                     sequence.size() * sizeof(T), seed);
 }
 
-// T must be castable to uint64_t.
 template <class T>
 inline uint64_t FingerprintSingleField(const T& field, uint64_t seed) {
   return fasthash64(reinterpret_cast<const char*>(&field), sizeof(T), seed);
@@ -342,6 +357,9 @@ H AbslHashValue(H h, const LinearConstraintProto& m) {
 }
 
 bool ConvertCpModelProtoToCnf(const CpModelProto& cp_mode, std::string* out);
+
+// We assume delta >= 0 and we only use the low bit of delta.
+int CombineSeed(int base_seed, int64_t delta);
 
 }  // namespace sat
 }  // namespace operations_research

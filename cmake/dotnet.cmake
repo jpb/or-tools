@@ -263,11 +263,27 @@ function(add_dotnet_test)
     WORKING_DIRECTORY ${DOTNET_TEST_DIR})
 
   if(BUILD_TESTING)
-    add_test(
-      NAME dotnet_${COMPONENT_NAME}_${TEST_NAME}
-      COMMAND ${CMAKE_COMMAND} -E env --unset=TARGETNAME
-      ${DOTNET_EXECUTABLE} test --nologo -c Release ${TEST_NAME}.csproj
-      WORKING_DIRECTORY ${DOTNET_TEST_DIR})
+    if(USE_DOTNET_6)
+      add_test(
+        NAME dotnet_${COMPONENT_NAME}_${TEST_NAME}_net60
+        COMMAND ${CMAKE_COMMAND} -E env --unset=TARGETNAME
+          ${DOTNET_EXECUTABLE} test --nologo --framework net6.0 -c Release
+          WORKING_DIRECTORY ${DOTNET_TEST_DIR})
+    endif()
+    if(USE_DOTNET_7)
+      add_test(
+        NAME dotnet_${COMPONENT_NAME}_${TEST_NAME}_net70
+        COMMAND ${CMAKE_COMMAND} -E env --unset=TARGETNAME
+          ${DOTNET_EXECUTABLE} test --nologo --framework net7.0 -c Release
+          WORKING_DIRECTORY ${DOTNET_TEST_DIR})
+    endif()
+    if(USE_DOTNET_8)
+      add_test(
+        NAME dotnet_${COMPONENT_NAME}_${TEST_NAME}_net80
+        COMMAND ${CMAKE_COMMAND} -E env --unset=TARGETNAME
+          ${DOTNET_EXECUTABLE} test --nologo --framework net8.0 -c Release
+          WORKING_DIRECTORY ${DOTNET_TEST_DIR})
+    endif()
   endif()
   message(STATUS "Configuring test ${TEST_FILE_NAME} ...DONE")
 endfunction()
@@ -278,7 +294,14 @@ endfunction()
 list(APPEND CMAKE_SWIG_FLAGS "-I${PROJECT_SOURCE_DIR}")
 
 # Swig wrap all libraries
-foreach(SUBPROJECT IN ITEMS algorithms graph init linear_solver constraint_solver sat util)
+foreach(SUBPROJECT IN ITEMS
+ algorithms
+ graph
+ init
+ linear_solver
+ constraint_solver
+ sat
+ util)
   add_subdirectory(ortools/${SUBPROJECT}/csharp)
   target_link_libraries(google-ortools-native PRIVATE dotnet_${SUBPROJECT})
 endforeach()
@@ -294,7 +317,9 @@ configure_file(
   COPYONLY)
 set(DOTNET_README_DIR "${PROJECT_BINARY_DIR}/dotnet")
 
-configure_file(${PROJECT_SOURCE_DIR}/ortools/dotnet/Directory.Build.props.in ${PROJECT_BINARY_DIR}/dotnet/Directory.Build.props)
+configure_file(
+  ${PROJECT_SOURCE_DIR}/ortools/dotnet/Directory.Build.props.in
+  ${PROJECT_BINARY_DIR}/dotnet/Directory.Build.props)
 
 ############################
 ##  .Net SNK file  ##
@@ -629,7 +654,8 @@ if(NOT EXAMPLE_FILE_NAME)
     OUTPUT ${DOTNET_EXAMPLE_DIR}/timestamp
     COMMAND ${CMAKE_COMMAND} -E env --unset=TARGETNAME
       ${DOTNET_EXECUTABLE} build --nologo -c Release ${EXAMPLE_NAME}.csproj
-    COMMAND ${CMAKE_COMMAND} -E env --unset=TARGETNAME ${DOTNET_EXECUTABLE} pack -c Release ${EXAMPLE_NAME}.csproj
+    COMMAND ${CMAKE_COMMAND} -E env --unset=TARGETNAME
+      ${DOTNET_EXECUTABLE} pack --nologo -c Release ${EXAMPLE_NAME}.csproj
     COMMAND ${CMAKE_COMMAND} -E touch ${DOTNET_EXAMPLE_DIR}/timestamp
     DEPENDS
       ${DOTNET_EXAMPLE_DIR}/${EXAMPLE_NAME}.csproj

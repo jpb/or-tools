@@ -16,7 +16,7 @@ jobs:
         ]
       fail-fast: false
     name: MacOS • Bazel • Python-${{ matrix.python.version }}
-    runs-on: macos-latest
+    runs-on: macos-13 # last macos intel based runner
     steps:
       - uses: actions/checkout@v4
       - name: Set Java to OpenJDK 17 (Temurin)
@@ -32,13 +32,14 @@ jobs:
           python-version: ${{ matrix.python.version }}
       - name: Check Python
         run: python --version
-      - name: Install Bazel
-        run: |
-          brew update
-          brew unlink bazelisk
-          brew install bazel
       - name: Check Bazel
         run: bazel version
+      - name: Change Python in WORKSPACE
+        run: >
+          sed
+          -i ''
+          -e 's/\(DEFAULT_PYTHON =\) "3.[0-9]*"/\1 "${{ matrix.python.version }}"/g'
+          WORKSPACE
       - name: Build
         run: >
           bazel build

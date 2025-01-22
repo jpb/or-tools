@@ -110,7 +110,17 @@ class LogToString:
         return self.__log
 
 
+class BestBoundCallback:
+
+    def __init__(self):
+        self.best_bound: float = 0.0
+
+    def new_best_bound(self, bb: float):
+        self.best_bound = bb
+
+
 class CpModelTest(absltest.TestCase):
+
     def testCreateIntegerVariable(self):
         print("testCreateIntegerVariable")
         model = cp_model.CpModel()
@@ -993,16 +1003,22 @@ class CpModelTest(absltest.TestCase):
         x = model.new_int_var(0, 4, "x")
         y = model.new_int_var(0, 3, "y")
         i = model.new_interval_var(x, 3, y, "i")
-        self.assertEqual(1, i.index)
+        self.assertEqual(0, i.index)
 
         j = model.new_fixed_size_interval_var(x, 2, "j")
-        self.assertEqual(2, j.index)
+        self.assertEqual(1, j.index)
         start_expr = j.start_expr()
         size_expr = j.size_expr()
         end_expr = j.end_expr()
         self.assertEqual(x.index, start_expr.index)
         self.assertEqual(size_expr, 2)
         self.assertEqual(str(end_expr), "(x + 2)")
+
+    def testAbsentInterval(self):
+        print("testInterval")
+        model = cp_model.CpModel()
+        i = model.new_optional_interval_var(1, 0, 1, False, "")
+        self.assertEqual(0, i.index)
 
     def testOptionalInterval(self):
         print("testOptionalInterval")
@@ -1014,16 +1030,16 @@ class CpModelTest(absltest.TestCase):
         j = model.new_optional_interval_var(x, y, 10, b, "j")
         k = model.new_optional_interval_var(x, -y, 10, b, "k")
         l = model.new_optional_interval_var(x, 10, -y, b, "l")
-        self.assertEqual(1, i.index)
-        self.assertEqual(3, j.index)
-        self.assertEqual(5, k.index)
-        self.assertEqual(7, l.index)
+        self.assertEqual(0, i.index)
+        self.assertEqual(1, j.index)
+        self.assertEqual(2, k.index)
+        self.assertEqual(3, l.index)
         self.assertRaises(TypeError, model.new_optional_interval_var, 1, 2, 3, x, "x")
         self.assertRaises(
             TypeError, model.new_optional_interval_var, b + x, 2, 3, b, "x"
         )
         self.assertRaises(
-            AttributeError, model.new_optional_interval_var, 1, 2, 3, b + 1, "x"
+            TypeError, model.new_optional_interval_var, 1, 2, 3, b + 1, "x"
         )
 
     def testNoOverlap(self):
@@ -1035,10 +1051,10 @@ class CpModelTest(absltest.TestCase):
         i = model.new_interval_var(x, 3, y, "i")
         j = model.new_interval_var(x, 5, z, "j")
         ct = model.add_no_overlap([i, j])
-        self.assertEqual(4, ct.index)
+        self.assertEqual(2, ct.index)
         self.assertLen(ct.proto.no_overlap.intervals, 2)
-        self.assertEqual(1, ct.proto.no_overlap.intervals[0])
-        self.assertEqual(3, ct.proto.no_overlap.intervals[1])
+        self.assertEqual(0, ct.proto.no_overlap.intervals[0])
+        self.assertEqual(1, ct.proto.no_overlap.intervals[1])
 
     def testNoOverlap2D(self):
         print("testNoOverlap2D")
@@ -1049,13 +1065,13 @@ class CpModelTest(absltest.TestCase):
         i = model.new_interval_var(x, 3, y, "i")
         j = model.new_interval_var(x, 5, z, "j")
         ct = model.add_no_overlap_2d([i, j], [j, i])
-        self.assertEqual(4, ct.index)
+        self.assertEqual(2, ct.index)
         self.assertLen(ct.proto.no_overlap_2d.x_intervals, 2)
-        self.assertEqual(1, ct.proto.no_overlap_2d.x_intervals[0])
-        self.assertEqual(3, ct.proto.no_overlap_2d.x_intervals[1])
+        self.assertEqual(0, ct.proto.no_overlap_2d.x_intervals[0])
+        self.assertEqual(1, ct.proto.no_overlap_2d.x_intervals[1])
         self.assertLen(ct.proto.no_overlap_2d.y_intervals, 2)
-        self.assertEqual(3, ct.proto.no_overlap_2d.y_intervals[0])
-        self.assertEqual(1, ct.proto.no_overlap_2d.y_intervals[1])
+        self.assertEqual(1, ct.proto.no_overlap_2d.y_intervals[0])
+        self.assertEqual(0, ct.proto.no_overlap_2d.y_intervals[1])
 
     def testCumulative(self):
         print("testCumulative")
@@ -1072,7 +1088,7 @@ class CpModelTest(absltest.TestCase):
         demands = [1, 3, 5, 2, 4, 5, 3, 4, 2, 3]
         capacity = 4
         ct = model.add_cumulative(intervals, demands, capacity)
-        self.assertEqual(20, ct.index)
+        self.assertEqual(10, ct.index)
         self.assertLen(ct.proto.cumulative.intervals, 10)
         self.assertRaises(TypeError, model.add_cumulative, [intervals[0], 3], [2, 3], 3)
 
@@ -1236,7 +1252,6 @@ class CpModelTest(absltest.TestCase):
         status = solver.solve(model, solution_counter)
         self.assertEqual(cp_model.OPTIMAL, status)
         self.assertEqual(5, solution_counter.solution_count)
-        model.minimize(x)
 
     def testSolveWithSolutionCallback(self):
         print("testSolveWithSolutionCallback")
@@ -1251,6 +1266,25 @@ class CpModelTest(absltest.TestCase):
         status = solver.solve(model, solution_sum)
         self.assertEqual(cp_model.OPTIMAL, status)
         self.assertEqual(6, solution_sum.sum)
+
+    def testBestBoundCallback(self):
+        print("testBestBoundCallback")
+        model = cp_model.CpModel()
+        x0 = model.new_bool_var("x0")
+        x1 = model.new_bool_var("x1")
+        x2 = model.new_bool_var("x2")
+        x3 = model.new_bool_var("x3")
+        model.add_bool_or(x0, x1, x2, x3)
+        model.minimize(3 * x0 + 2 * x1 + 4 * x2 + 5 * x3 + 0.6)
+
+        solver = cp_model.CpSolver()
+        best_bound_callback = BestBoundCallback()
+        solver.best_bound_callback = best_bound_callback.new_best_bound
+        solver.parameters.num_workers = 1
+        solver.parameters.linearization_level = 2
+        status = solver.solve(model)
+        self.assertEqual(cp_model.OPTIMAL, status)
+        self.assertEqual(2.6, best_bound_callback.best_bound)
 
     def testValue(self):
         print("testValue")
@@ -1613,7 +1647,7 @@ class CpModelTest(absltest.TestCase):
             + fixed_intervals.to_list()
             + absent_fixed_intervals.to_list()
         )
-        self.assertLen(model.proto.constraints, 19)
+        self.assertLen(model.proto.constraints, 13)
 
 
 if __name__ == "__main__":

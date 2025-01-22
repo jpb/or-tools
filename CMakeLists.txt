@@ -12,7 +12,7 @@
 # limitations under the License.
 
 # This file is just an orchestration
-cmake_minimum_required(VERSION 3.18)
+cmake_minimum_required(VERSION 3.20)
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 
 include(utils)
@@ -196,8 +196,13 @@ if(BUILD_TESTING)
   CMAKE_DEPENDENT_OPTION(BUILD_googletest "Build googletest" OFF
     "NOT BUILD_DEPS" ON)
   message(STATUS "Build googletest: ${BUILD_googletest}")
+
+  CMAKE_DEPENDENT_OPTION(BUILD_benchmark "Build benchmark" OFF
+    "NOT BUILD_DEPS" ON)
+  message(STATUS "Build benchmark: ${BUILD_benchmark}")
 else()
   set(BUILD_googletest OFF)
+  set(BUILD_benchmark OFF)
 endif()
 
 # Optional third party solvers (enabled by default)
@@ -254,7 +259,7 @@ message(STATUS "Gurobi support: ${USE_GUROBI}")
 
 ## HiGHS
 # see: https://github.com/ERGO-Code/HiGHS
-CMAKE_DEPENDENT_OPTION(USE_HIGHS "Use the HiGHS solver" OFF "BUILD_CXX" OFF)
+CMAKE_DEPENDENT_OPTION(USE_HIGHS "Use the HiGHS solver" ON "BUILD_CXX" OFF)
 message(STATUS "HiGHS support: ${USE_HIGHS}")
 if(USE_HIGHS)
   CMAKE_DEPENDENT_OPTION(BUILD_HIGHS "Build the HiGHS dependency Library" OFF
@@ -393,35 +398,17 @@ CMAKE_DEPENDENT_OPTION(BUILD_PYTHON_DOC "Build the Python doc" OFF "NOT BUILD_DO
   message(STATUS "Python: Fetch dependencies: ${FETCH_PYTHON_DEPS}")
 endif()
 
+# Find system deps
+include(system_deps)
+
 # Build Needed dependencies
 add_subdirectory(cmake/dependencies dependencies)
 list(APPEND CMAKE_PREFIX_PATH ${CMAKE_CURRENT_BINARY_DIR}/dependencies/install)
 
-# Basic type
-include(CMakePushCheckState)
-cmake_push_check_state(RESET)
-set(CMAKE_EXTRA_INCLUDE_FILES "cstdint")
-include(CheckTypeSize)
-check_type_size("long" SIZEOF_LONG LANGUAGE CXX)
-message(STATUS "Found long size: ${SIZEOF_LONG}")
-check_type_size("long long" SIZEOF_LONG_LONG LANGUAGE CXX)
-message(STATUS "Found long long size: ${SIZEOF_LONG_LONG}")
-check_type_size("int64_t" SIZEOF_INT64_T LANGUAGE CXX)
-message(STATUS "Found int64_t size: ${SIZEOF_INT64_T}")
-
-check_type_size("unsigned long" SIZEOF_ULONG LANGUAGE CXX)
-message(STATUS "Found unsigned long size: ${SIZEOF_ULONG}")
-check_type_size("unsigned long long" SIZEOF_ULONG_LONG LANGUAGE CXX)
-message(STATUS "Found unsigned long long size: ${SIZEOF_ULONG_LONG}")
-check_type_size("uint64_t" SIZEOF_UINT64_T LANGUAGE CXX)
-message(STATUS "Found uint64_t size: ${SIZEOF_UINT64_T}")
-
-check_type_size("int *" SIZEOF_INT_P LANGUAGE CXX)
-message(STATUS "Found int * size: ${SIZEOF_INT_P}")
-cmake_pop_check_state()
-
 include(host)
-include(deps)
+# verify deps
+include(check_deps)
+
 include(cpp)
 include(flatzinc)
 include(glop)

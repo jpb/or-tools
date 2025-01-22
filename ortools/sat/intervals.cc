@@ -14,6 +14,7 @@
 #include "ortools/sat/intervals.h"
 
 #include <algorithm>
+#include <cstdint>
 #include <functional>
 #include <string>
 #include <utility>
@@ -226,10 +227,12 @@ void IntervalsRepository::InitAllDecomposedEnergies() {
 
 SchedulingConstraintHelper::SchedulingConstraintHelper(
     const std::vector<IntervalVariable>& tasks, Model* model)
-    : trail_(model->GetOrCreate<Trail>()),
+    : model_(model),
+      trail_(model->GetOrCreate<Trail>()),
+      sat_solver_(model->GetOrCreate<SatSolver>()),
       integer_trail_(model->GetOrCreate<IntegerTrail>()),
+      watcher_(model->GetOrCreate<GenericLiteralWatcher>()),
       precedence_relations_(model->GetOrCreate<PrecedenceRelations>()),
-      precedences_(model->GetOrCreate<PrecedencesPropagator>()),
       interval_variables_(tasks),
       capacity_(tasks.size()),
       cached_size_min_(new IntegerValue[capacity_]),
@@ -269,10 +272,11 @@ SchedulingConstraintHelper::SchedulingConstraintHelper(
 
 SchedulingConstraintHelper::SchedulingConstraintHelper(int num_tasks,
                                                        Model* model)
-    : trail_(model->GetOrCreate<Trail>()),
+    : model_(model),
+      trail_(model->GetOrCreate<Trail>()),
+      sat_solver_(model->GetOrCreate<SatSolver>()),
       integer_trail_(model->GetOrCreate<IntegerTrail>()),
       precedence_relations_(model->GetOrCreate<PrecedenceRelations>()),
-      precedences_(model->GetOrCreate<PrecedencesPropagator>()),
       capacity_(num_tasks),
       cached_size_min_(new IntegerValue[capacity_]),
       cached_start_min_(new IntegerValue[capacity_]),
@@ -287,26 +291,15 @@ SchedulingConstraintHelper::SchedulingConstraintHelper(int num_tasks,
 
 bool SchedulingConstraintHelper::Propagate() {
   recompute_all_cache_ = true;
+  for (const int id : propagator_ids_) watcher_->CallOnNextPropagate(id);
   return true;
 }
 
 bool SchedulingConstraintHelper::IncrementalPropagate(
     const std::vector<int>& watch_indices) {
-  for (const int t : watch_indices) recompute_cache_[t] = true;
+  for (const int t : watch_indices) recompute_cache_.Set(t);
+  for (const int id : propagator_ids_) watcher_->CallOnNextPropagate(id);
   return true;
-}
-
-void SchedulingConstraintHelper::SetLevel(int level) {
-  // If there was an Untrail before, we need to refresh the cache so that
-  // we never have value from lower in the search tree.
-  //
-  // TODO(user): We could be smarter here, but then this is not visible in our
-  // cpu_profile since we call many times IncrementalPropagate() for each new
-  // decision, but just call Propagate() once after each Untrail().
-  if (level < previous_level_) {
-    recompute_all_cache_ = true;
-  }
-  previous_level_ = level;
 }
 
 void SchedulingConstraintHelper::RegisterWith(GenericLiteralWatcher* watcher) {
@@ -318,14 +311,9 @@ void SchedulingConstraintHelper::RegisterWith(GenericLiteralWatcher* watcher) {
     watcher->WatchIntegerVariable(ends_[t].var, id, t);
   }
   watcher->SetPropagatorPriority(id, 0);
-
-  // Note that it is important to register with the integer_trail_ so we are
-  // ALWAYS called before any propagator that depends on this helper.
-  integer_trail_->RegisterReversibleClass(this);
 }
 
 bool SchedulingConstraintHelper::UpdateCachedValues(int t) {
-  recompute_cache_[t] = false;
   if (IsAbsent(t)) return true;
 
   IntegerValue smin = integer_trail_->LowerBound(starts_[t]);
@@ -344,6 +332,7 @@ bool SchedulingConstraintHelper::UpdateCachedValues(int t) {
 
   // Detect first if we have a conflict using the relation start + size = end.
   if (dmax < 0) {
+    ClearReason();
     AddSizeMaxReason(t, dmax);
     return PushTaskAbsence(t);
   }
@@ -377,6 +366,11 @@ bool SchedulingConstraintHelper::UpdateCachedValues(int t) {
   if (emin != cached_end_min_[t]) {
     recompute_energy_profile_ = true;
   }
+
+  // We might only want to do that if the value changed, but I am not sure it
+  // is worth the test.
+  recompute_by_start_max_ = true;
+  recompute_by_end_min_ = true;
 
   cached_start_min_[t] = smin;
   cached_end_min_[t] = emin;
@@ -430,26 +424,35 @@ void SchedulingConstraintHelper::InitSortedVectors() {
   const int num_tasks = starts_.size();
 
   recompute_all_cache_ = true;
-  recompute_cache_.resize(num_tasks, true);
+  recompute_cache_.Resize(num_tasks);
+  for (int t = 0; t < num_tasks; ++t) {
+    recompute_cache_.Set(t);
+  }
 
   // Make sure all the cached_* arrays can hold enough data.
   CHECK_LE(num_tasks, capacity_);
 
   task_by_increasing_start_min_.resize(num_tasks);
   task_by_increasing_end_min_.resize(num_tasks);
-  task_by_decreasing_start_max_.resize(num_tasks);
+  task_by_increasing_negated_start_max_.resize(num_tasks);
   task_by_decreasing_end_max_.resize(num_tasks);
   task_by_increasing_shifted_start_min_.resize(num_tasks);
   task_by_negated_shifted_end_max_.resize(num_tasks);
   for (int t = 0; t < num_tasks; ++t) {
     task_by_increasing_start_min_[t].task_index = t;
     task_by_increasing_end_min_[t].task_index = t;
-    task_by_decreasing_start_max_[t].task_index = t;
+    task_by_increasing_negated_start_max_[t].task_index = t;
     task_by_decreasing_end_max_[t].task_index = t;
+
     task_by_increasing_shifted_start_min_[t].task_index = t;
+    task_by_increasing_shifted_start_min_[t].presence_lit =
+        reason_for_presence_[t];
     task_by_negated_shifted_end_max_[t].task_index = t;
+    task_by_negated_shifted_end_max_[t].presence_lit = reason_for_presence_[t];
   }
 
+  recompute_by_start_max_ = true;
+  recompute_by_end_min_ = true;
   recompute_energy_profile_ = true;
   recompute_shifted_start_min_ = true;
   recompute_negated_shifted_end_max_ = true;
@@ -463,7 +466,9 @@ void SchedulingConstraintHelper::SetTimeDirection(bool is_forward) {
     std::swap(ends_, minus_starts_);
 
     std::swap(task_by_increasing_start_min_, task_by_decreasing_end_max_);
-    std::swap(task_by_increasing_end_min_, task_by_decreasing_start_max_);
+    std::swap(task_by_increasing_end_min_,
+              task_by_increasing_negated_start_max_);
+    std::swap(recompute_by_end_min_, recompute_by_start_max_);
     std::swap(task_by_increasing_shifted_start_min_,
               task_by_negated_shifted_end_max_);
 
@@ -478,17 +483,24 @@ void SchedulingConstraintHelper::SetTimeDirection(bool is_forward) {
 bool SchedulingConstraintHelper::SynchronizeAndSetTimeDirection(
     bool is_forward) {
   SetTimeDirection(is_forward);
+
+  // If there was any backtracks since the last time this was called, we
+  // recompute our cache.
+  if (sat_solver_->num_backtracks() != saved_num_backtracks_) {
+    recompute_all_cache_ = true;
+    saved_num_backtracks_ = sat_solver_->num_backtracks();
+  }
+
   if (recompute_all_cache_) {
     for (int t = 0; t < recompute_cache_.size(); ++t) {
       if (!UpdateCachedValues(t)) return false;
     }
   } else {
-    for (int t = 0; t < recompute_cache_.size(); ++t) {
-      if (recompute_cache_[t]) {
-        if (!UpdateCachedValues(t)) return false;
-      }
+    for (const int t : recompute_cache_) {
+      if (!UpdateCachedValues(t)) return false;
     }
   }
+  recompute_cache_.ClearAll();
   recompute_all_cache_ = false;
   return true;
 }
@@ -499,50 +511,63 @@ IntegerValue SchedulingConstraintHelper::GetCurrentMinDistanceBetweenTasks(
     int a, int b, bool add_reason_if_after) {
   const AffineExpression before = ends_[a];
   const AffineExpression after = starts_[b];
-  if (before.var == kNoIntegerVariable) return kMinIntegerValue;
-  if (after.var == kNoIntegerVariable) return kMinIntegerValue;
-
-  const IntegerValue needed = before.constant - after.constant;
-  const IntegerValue static_known =
-      precedence_relations_->GetOffset(before.var, after.var);
-
-  const std::pair<Literal, IntegerValue> dynamic_known =
-      precedences_->GetConditionalOffset(before.var, after.var);
-
-  const IntegerValue best = std::max(static_known, dynamic_known.second);
-  if (best == kMinIntegerValue) return kMinIntegerValue;
-
-  if (add_reason_if_after && dynamic_known.second > static_known &&
-      dynamic_known.second >= needed) {
-    literal_reason_.push_back(dynamic_known.first.Negated());
+  if (before.var == kNoIntegerVariable || before.coeff != 1 ||
+      after.var == kNoIntegerVariable || after.coeff != 1) {
+    return kMinIntegerValue;
   }
-  return best - needed;
+
+  // We take the max of the level zero offset and the one coming from a
+  // conditional precedence at true.
+  const IntegerValue conditional_offset =
+      precedence_relations_->GetConditionalOffset(before.var, after.var);
+  const IntegerValue known = integer_trail_->LevelZeroLowerBound(after.var) -
+                             integer_trail_->LevelZeroUpperBound(before.var);
+  const IntegerValue offset = std::max(conditional_offset, known);
+
+  const IntegerValue needed_offset = before.constant - after.constant;
+  const IntegerValue distance = offset - needed_offset;
+  if (add_reason_if_after && distance >= 0 && known < conditional_offset) {
+    for (const Literal l : precedence_relations_->GetConditionalEnforcements(
+             before.var, after.var)) {
+      literal_reason_.push_back(l.Negated());
+    }
+  }
+  return distance;
 }
 
-void SchedulingConstraintHelper::AddLevelZeroPrecedence(int a, int b) {
+// Note that we could call this at a positive level to propagate any literal
+// associated to task a before task b. However we only call this for task that
+// are in detectable precedence, which means the normal precedence or linear
+// propagator should have already propagated that Boolean too.
+bool SchedulingConstraintHelper::PropagatePrecedence(int a, int b) {
+  CHECK(IsPresent(a));
+  CHECK(IsPresent(b));
   CHECK_EQ(trail_->CurrentDecisionLevel(), 0);
-  if (!IsPresent(a)) return;
-  if (!IsPresent(b)) return;
+
   const AffineExpression before = ends_[a];
   const AffineExpression after = starts_[b];
-  if (after.coeff != 1) return;
-  if (before.coeff != 1) return;
-  if (after.var == kNoIntegerVariable) return;
-  if (before.var == kNoIntegerVariable) return;
+  if (after.coeff != 1) return true;
+  if (before.coeff != 1) return true;
+  if (after.var == kNoIntegerVariable) return true;
+  if (before.var == kNoIntegerVariable) return true;
   const IntegerValue offset = before.constant - after.constant;
-  precedence_relations_->Add(before.var, after.var, offset);
-  if (precedences_->AddPrecedenceWithOffsetIfNew(before.var, after.var,
-                                                 offset)) {
+  if (precedence_relations_->Add(before.var, after.var, offset)) {
     VLOG(2) << "new relation " << TaskDebugString(a)
             << " <= " << TaskDebugString(b);
+
+    // TODO(user): Adding new constraint during propagation might not be the
+    // best idea as it can create some complication.
+    AddWeightedSumLowerOrEqual({}, {before.var, after.var},
+                               {int64_t{1}, int64_t{-1}}, -offset.value(),
+                               model_);
+    if (model_->GetOrCreate<SatSolver>()->ModelIsUnsat()) return false;
   }
+  return true;
 }
 
 absl::Span<const TaskTime>
 SchedulingConstraintHelper::TaskByIncreasingStartMin() {
-  const int num_tasks = NumTasks();
-  for (int i = 0; i < num_tasks; ++i) {
-    TaskTime& ref = task_by_increasing_start_min_[i];
+  for (TaskTime& ref : task_by_increasing_start_min_) {
     ref.time = StartMin(ref.task_index);
   }
   IncrementalSort(task_by_increasing_start_min_.begin(),
@@ -552,34 +577,31 @@ SchedulingConstraintHelper::TaskByIncreasingStartMin() {
 
 absl::Span<const TaskTime>
 SchedulingConstraintHelper::TaskByIncreasingEndMin() {
-  const int num_tasks = NumTasks();
-  for (int i = 0; i < num_tasks; ++i) {
-    TaskTime& ref = task_by_increasing_end_min_[i];
+  if (!recompute_by_end_min_) return task_by_increasing_end_min_;
+  for (TaskTime& ref : task_by_increasing_end_min_) {
     ref.time = EndMin(ref.task_index);
   }
   IncrementalSort(task_by_increasing_end_min_.begin(),
                   task_by_increasing_end_min_.end());
+  recompute_by_end_min_ = false;
   return task_by_increasing_end_min_;
 }
 
 absl::Span<const TaskTime>
-SchedulingConstraintHelper::TaskByDecreasingStartMax() {
-  const int num_tasks = NumTasks();
-  for (int i = 0; i < num_tasks; ++i) {
-    TaskTime& ref = task_by_decreasing_start_max_[i];
-    ref.time = StartMax(ref.task_index);
+SchedulingConstraintHelper::TaskByIncreasingNegatedStartMax() {
+  if (!recompute_by_start_max_) return task_by_increasing_negated_start_max_;
+  for (TaskTime& ref : task_by_increasing_negated_start_max_) {
+    ref.time = cached_negated_start_max_[ref.task_index];
   }
-  IncrementalSort(task_by_decreasing_start_max_.begin(),
-                  task_by_decreasing_start_max_.end(),
-                  std::greater<TaskTime>());
-  return task_by_decreasing_start_max_;
+  IncrementalSort(task_by_increasing_negated_start_max_.begin(),
+                  task_by_increasing_negated_start_max_.end());
+  recompute_by_start_max_ = false;
+  return task_by_increasing_negated_start_max_;
 }
 
 absl::Span<const TaskTime>
 SchedulingConstraintHelper::TaskByDecreasingEndMax() {
-  const int num_tasks = NumTasks();
-  for (int i = 0; i < num_tasks; ++i) {
-    TaskTime& ref = task_by_decreasing_end_max_[i];
+  for (TaskTime& ref : task_by_decreasing_end_max_) {
     ref.time = EndMax(ref.task_index);
   }
   IncrementalSort(task_by_decreasing_end_max_.begin(),
@@ -587,15 +609,13 @@ SchedulingConstraintHelper::TaskByDecreasingEndMax() {
   return task_by_decreasing_end_max_;
 }
 
-absl::Span<const TaskTime>
+absl::Span<const CachedTaskBounds>
 SchedulingConstraintHelper::TaskByIncreasingShiftedStartMin() {
   if (recompute_shifted_start_min_) {
     recompute_shifted_start_min_ = false;
-    const int num_tasks = NumTasks();
     bool is_sorted = true;
     IntegerValue previous = kMinIntegerValue;
-    for (int i = 0; i < num_tasks; ++i) {
-      TaskTime& ref = task_by_increasing_shifted_start_min_[i];
+    for (CachedTaskBounds& ref : task_by_increasing_shifted_start_min_) {
       ref.time = ShiftedStartMin(ref.task_index);
       is_sorted = is_sorted && ref.time >= previous;
       previous = ref.time;
@@ -708,8 +728,8 @@ bool SchedulingConstraintHelper::PushIntegerLiteralIfTaskPresent(
 bool SchedulingConstraintHelper::PushIntervalBound(int t, IntegerLiteral lit) {
   if (!PushIntegerLiteralIfTaskPresent(t, lit)) return false;
   if (IsAbsent(t)) return true;
-  if (!precedences_->PropagateOutgoingArcs(lit.var)) return false;
   if (!UpdateCachedValues(t)) return false;
+  recompute_cache_.Clear(t);
   return true;
 }
 
@@ -779,24 +799,29 @@ bool SchedulingConstraintHelper::ReportConflict() {
   return integer_trail_->ReportConflict(literal_reason_, integer_reason_);
 }
 
-void SchedulingConstraintHelper::WatchAllTasks(int id,
-                                               GenericLiteralWatcher* watcher,
-                                               bool watch_start_max,
-                                               bool watch_end_max) const {
+void SchedulingConstraintHelper::WatchAllTasks(int id, bool watch_max_side) {
+  // In all cases, we watch presence literals since this class is not waked up
+  // when those changes.
   const int num_tasks = starts_.size();
   for (int t = 0; t < num_tasks; ++t) {
-    watcher->WatchLowerBound(starts_[t], id);
-    watcher->WatchLowerBound(ends_[t], id);
-    watcher->WatchLowerBound(sizes_[t], id);
-    if (watch_start_max) {
-      watcher->WatchUpperBound(starts_[t], id);
-    }
-    if (watch_end_max) {
-      watcher->WatchUpperBound(ends_[t], id);
-    }
     if (!IsPresent(t) && !IsAbsent(t)) {
-      watcher->WatchLiteral(Literal(reason_for_presence_[t]), id);
+      watcher_->WatchLiteral(Literal(reason_for_presence_[t]), id);
     }
+  }
+
+  // If everything is watched, it is slighlty more efficient to enqueue the
+  // propagator when the helper Propagate() is called. This result in less
+  // entries in our watched lists.
+  if (watch_max_side) {
+    propagator_ids_.push_back(id);
+    return;
+  }
+
+  // We only watch "min" side.
+  for (int t = 0; t < num_tasks; ++t) {
+    watcher_->WatchLowerBound(starts_[t], id);
+    watcher_->WatchLowerBound(ends_[t], id);
+    watcher_->WatchLowerBound(sizes_[t], id);
   }
 }
 
@@ -1025,6 +1050,15 @@ void SchedulingDemandHelper::AddDemandMinReason(int t) {
   if (demands_[t].var != kNoIntegerVariable) {
     helper_->MutableIntegerReason()->push_back(
         integer_trail_->LowerBoundAsLiteral(demands_[t].var));
+  }
+}
+
+void SchedulingDemandHelper::AddDemandMinReason(int t,
+                                                IntegerValue min_demand) {
+  DCHECK_LT(t, demands_.size());
+  if (demands_[t].var != kNoIntegerVariable) {
+    helper_->MutableIntegerReason()->push_back(
+        demands_[t].GreaterOrEqual(min_demand));
   }
 }
 

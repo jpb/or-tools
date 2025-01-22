@@ -168,15 +168,12 @@
 #ifndef OR_TOOLS_GRAPH_MIN_COST_FLOW_H_
 #define OR_TOOLS_GRAPH_MIN_COST_FLOW_H_
 
-#include <algorithm>
 #include <cstdint>
 #include <stack>
 #include <string>
 #include <vector>
 
 #include "absl/strings/string_view.h"
-#include "ortools/base/logging.h"
-#include "ortools/base/types.h"
 #include "ortools/graph/ebert_graph.h"
 #include "ortools/graph/graph.h"
 #include "ortools/util/stats.h"
@@ -672,6 +669,22 @@ class GenericMinCostFlow : public MinCostFlowBase {
 };
 
 #if !SWIG
+
+// Note: SWIG does not seem to understand explicit template specialization and
+// instantiation declarations.
+
+extern template class GenericMinCostFlow<StarGraph>;
+extern template class GenericMinCostFlow<::util::ReverseArcListGraph<>>;
+extern template class GenericMinCostFlow<::util::ReverseArcStaticGraph<>>;
+extern template class GenericMinCostFlow<::util::ReverseArcMixedGraph<>>;
+extern template class GenericMinCostFlow<
+    ::util::ReverseArcStaticGraph<uint16_t, int32_t>>;
+extern template class GenericMinCostFlow<
+    ::util::ReverseArcListGraph<int64_t, int64_t>, int64_t, int64_t>;
+extern template class GenericMinCostFlow<
+    ::util::ReverseArcStaticGraph<uint16_t, int32_t>,
+    /*ArcFlowType=*/int16_t,
+    /*ArcScaledCostType=*/int32_t>;
 
 // Default MinCostFlow instance that uses StarGraph.
 // New clients should use SimpleMinCostFlow if they can.

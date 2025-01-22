@@ -18,27 +18,31 @@
 #ifndef OR_TOOLS_LINEAR_SOLVER_SOLVE_MP_MODEL_H_
 #define OR_TOOLS_LINEAR_SOLVER_SOLVE_MP_MODEL_H_
 
-#include <atomic>
 #include <string>
 
 #include "ortools/linear_solver/linear_solver.pb.h"
+#include "ortools/util/lazy_mutable_copy.h"
+#include "ortools/util/solve_interrupter.h"
 
 namespace operations_research {
 
 /**
  * Solves the model encoded by a MPModelRequest protocol buffer and returns the
- * solution encoded as a MPSolutionResponse. The solve is stopped prematurely
- * if interrupt is non-null at set to true during (or before) solving.
- * Interruption is only supported if SolverTypeSupportsInterruption() returns
- * true for the requested solver. Passing a non-null interruption with any
- * other solver type immediately returns an MPSOLVER_INCOMPATIBLE_OPTIONS
- * error.
+ * solution encoded as a MPSolutionResponse.
+ *
+ * LazyMutableCopy<> accept both 'const MPModelRequest&' and 'MPModelRequest&&'
+ * prefer to call this with the std::move() version if you no longer need the
+ * request. It will allows to reclaim the request memory as soon as it is
+ * converted to one of the solver internal data representation.
+ *
+ * If interrupter is non-null, one can call interrupter->Interrupt() to stop the
+ * solver earlier. Interruption is only supported if
+ * SolverTypeSupportsInterruption() returns true for the requested solver.
+ * Passing a non-null pointer with any other solver type immediately returns an
+ * MPSOLVER_INCOMPATIBLE_OPTIONS error.
  */
-MPSolutionResponse SolveMPModel(
-    const MPModelRequest& model_request,
-    // `interrupt` is non-const because the internal
-    // solver may set it to true itself, in some cases.
-    std::atomic<bool>* interrupt = nullptr);
+MPSolutionResponse SolveMPModel(LazyMutableCopy<MPModelRequest> request,
+                                const SolveInterrupter* interrupter = nullptr);
 
 bool SolverTypeSupportsInterruption(MPModelRequest::SolverType solver);
 
